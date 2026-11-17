@@ -3,6 +3,15 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.4.0
+
+- Sharper video: the camera now captures in Full HD (1080p). Ceilings per person you send to:
+  2 people 4 Mbps at 1080p, 3 people 2.5 Mbps at 720p, 4 people 1.6 Mbps at 720p,
+  5-6 people 1 Mbps at 540p. Total upload stays around 4-5 Mbps. These are ceilings; on a
+  weak connection the browser lowers them by itself.
+- Clearer voice: 64 kbps for audio, about twice the usual default (measured 25 -> 50 kbps).
+- Connection details now show the video actually arriving from each person, e.g. "1080p, 30 fps".
+
 ## v1.3.0
 
 - Auto-reconnect. Switching from wifi to mobile data, a tunnel or a weak signal no longer

@@ -76,6 +76,9 @@ What to know:
 ## Limits
 
 - Up to 6 people per call; 2 to 4 is the sweet spot, since each phone sends its video to every other phone.
+- Quality: 1080p at up to 4 Mbps in a 1-on-1, 720p in groups of 3-4, 540p for 5-6, and 64 kbps
+  voice. The browser lowers this on its own when a connection is weak. Tap the people count in a
+  call to see what is actually arriving.
 - A direct connection is needed. It works on almost all home networks and most mobile
   data, but some office, hotel or public wifi blocks it. The app tells you when your
   network blocks calls and which side to switch to mobile data or another wifi.
@@ -107,7 +110,7 @@ npm test          # builds, starts a local relay, runs every test
 the back gesture), invite links, a wrong password never meeting the room, names and room
 names never running as code, reconnecting after a dropped connection (two and three people,
 without duplicate tiles or false "left" messages, and removing someone who never comes back),
-who-is-in showing and clearing live (and staying unreadable
+quality settings per group size (and kept after flipping the camera), who-is-in showing and clearing live (and staying unreadable
 to the relays and invisible to other passwords), the app only talking to its own site and the relays,
 refusing to run inside a frame, and the new version still calling the previous release.
 
