@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -265,7 +265,7 @@ let facing = 'user';
 let micOn = true, camOn = true;
 
 const AUDIO = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-const videoConstraints = f => ({ facingMode: f, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } });
+const videoConstraints = f => ({ facingMode: f, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } });
 
 async function startMedia() {
   $('mediaErr').textContent = '';
@@ -791,23 +791,46 @@ function watchRelays() {
   relayTimer = setInterval(check, 1000);
 }
 
-// Give each person a fair share of upload: sharper 1-to-1, lighter in groups.
+// Quality: capture in Full HD, then give each person a fair share of upload.
+// These are ceilings; the browser still lowers them on its own when a link is weak,
+// so a poor connection gets smooth video instead of stalls.
+//   people in call  per-person video      resolution sent   your total upload
+//   2               4.0 Mbps              1080p             4 Mbps
+//   3               2.5 Mbps              720p              5 Mbps
+//   4               1.6 Mbps              720p              4.8 Mbps
+//   5-6             1.0 Mbps              540p              4-5 Mbps
+// Voice gets 64 kbps (about twice the usual default) for clearer speech.
+const AUDIO_BITRATE = 64000;
+function sendProfile(others) {
+  if (others <= 1) return { bitrate: 4000000, scale: 1 };
+  if (others === 2) return { bitrate: 2500000, scale: 1.5 };
+  if (others === 3) return { bitrate: 1600000, scale: 1.5 };
+  return { bitrate: 1000000, scale: 2 };
+}
+
 function tuneBitrate() {
   if (!room) return;
   const n = people.size;
   if (!n) return;
-  const max = n === 1 ? 2500000 : n === 2 ? 1500000 : n === 3 ? 1000000 : 700000;
+  const video = sendProfile(n);
   let all = {};
   try { all = room.getPeers(); } catch {}
   for (const id of Object.keys(all)) {
     const pc = all[id] && all[id].connection;
     if (!pc) continue;
     for (const sender of pc.getSenders()) {
-      if (!sender.track || sender.track.kind !== 'video') continue;
+      if (!sender.track) continue;
       const params = sender.getParameters();
       if (!params.encodings || !params.encodings.length) continue;
-      if (params.encodings[0].maxBitrate === max) continue;
-      params.encodings[0].maxBitrate = max;
+      const e = params.encodings[0];
+      if (sender.track.kind === 'video') {
+        if (e.maxBitrate === video.bitrate && (e.scaleResolutionDownBy || 1) === video.scale) continue;
+        e.maxBitrate = video.bitrate;
+        e.scaleResolutionDownBy = video.scale;
+      } else {
+        if (e.maxBitrate === AUDIO_BITRATE) continue;
+        e.maxBitrate = AUDIO_BITRATE;
+      }
       sender.setParameters(params).catch(() => {});
     }
   }
@@ -896,6 +919,22 @@ async function connectionPath(peerId) {
   } catch { return ''; }
 }
 
+// What we are actually receiving from someone right now, e.g. "1080p, 30 fps".
+async function receiving(peerId) {
+  let pc = null;
+  try { const info = room && room.getPeers()[peerId]; pc = info && info.connection; } catch {}
+  if (!pc) return '';
+  try {
+    let line = '';
+    (await pc.getStats()).forEach(s => {
+      if (s.type === 'inbound-rtp' && s.kind === 'video' && s.frameHeight) {
+        line = `${s.frameHeight}p` + (s.framesPerSecond ? `, ${Math.round(s.framesPerSecond)} fps` : '');
+      }
+    });
+    return line;
+  } catch { return ''; }
+}
+
 async function renderDetails() {
   if ($('details').hidden) return;
   $('detailsNet').textContent = 'Your network: ' + (NET_LABEL[netType] || 'checking…');
@@ -903,10 +942,12 @@ async function renderDetails() {
   const items = [];
   for (const p of people.values()) {
     const path = p.peerId ? await connectionPath(p.peerId) : '';
+    const video = p.peerId && !p.reconnecting ? await receiving(p.peerId) : '';
     const li = el('li', '', p.name || 'Someone');
     const sub = p.reconnecting ? 'Reconnecting…' : path ? 'Direct connection, ' + path : (p.stream ? 'Connected' : 'Connecting…');
     const theirs = p.net ? ' · their network: ' + p.net : '';
     li.append(el('span', 'd-sub', sub + theirs));
+    if (video) li.append(el('span', 'd-sub', 'Video: ' + video));
     items.push(li);
   }
   for (const why of failures.values()) {
