@@ -226,3 +226,13 @@ body[data-screen="call"] #toasts { top: calc(var(--st) + 70px); bottom: auto; }
   position: absolute; top: -2px; right: 4px; width: 12px; height: 12px; border-radius: 50%;
   background: var(--live); border: 2px solid var(--bg);
 }
+
+/* who is talking */
+/* drawn above the video, which would otherwise cover an inset outline */
+.tile::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: inset 0 0 0 3px var(--live); opacity: 0; transition: opacity .15s;
+}
+.tile.speaking::after { opacity: 1; }
+#self { transition: border-color .15s, box-shadow .15s; }
+#self.speaking { border-color: var(--live); box-shadow: 0 0 0 2px var(--live); }
