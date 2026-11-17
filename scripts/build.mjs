@@ -7,7 +7,7 @@
 // Every file reference gets ?v=<version> so a phone never mixes files from two releases.
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,7 +18,8 @@ const out = args.out || '_site';
 const ref = args.ref || '';
 const relay = args.relay || '';
 
-const FILES = ['index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png', 'vendor'];
+// Everything the site needs: top-level page files plus vendor/. Tooling is left out.
+const isSiteFile = f => /\.(html|js|css|webmanifest|png)$/.test(f) && !/^(playwright\.config)\.js$/.test(f);
 
 let src = '.';
 let tmp = '';
@@ -32,10 +33,9 @@ if (ref) {
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const f of FILES) {
-  if (!existsSync(join(src, f))) throw new Error(`Missing ${f}`);
-  cpSync(join(src, f), join(out, f), { recursive: true });
-}
+const files = [...readdirSync(src).filter(isSiteFile), 'vendor'];
+for (const f of ['index.html', 'app.js', 'style.css', 'vendor']) if (!files.includes(f) || !existsSync(join(src, f))) throw new Error(`Missing ${f}`);
+for (const f of files) cpSync(join(src, f), join(out, f), { recursive: true });
 
 let app = readFileSync(join(out, 'app.js'), 'utf8');
 let html = readFileSync(join(out, 'index.html'), 'utf8');
@@ -47,6 +47,10 @@ html = html
   .replace('src="app.js"', `src="app.js?v=${version}"`)
   .replace('href="manifest.webmanifest"', `href="manifest.webmanifest?v=${version}"`);
 if (!html.includes(`app.js?v=${version}`)) throw new Error('Could not version app.js in index.html');
+
+// Our own modules imported by app.js are versioned the same way.
+const modules = files.filter(f => f.endsWith('.js') && f !== 'app.js');
+app = app.replace(/from '\.\/([\w-]+\.js)'/g, (m, f) => (modules.includes(f) ? `from './${f}?v=${version}'` : m));
 
 if (relay) {
   if (!/^wss?:\/\/[\w.:-]+$/.test(relay)) throw new Error(`Bad relay URL: ${relay}`);
