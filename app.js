@@ -13,6 +13,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
+const VERSION = '1.1.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -50,11 +51,11 @@ const validRoom = r => r && typeof r.name === 'string' && typeof r.key === 'stri
   r.name.length >= 1 && r.name.length <= 40 && r.key.length >= 8 && r.key.length <= 128;
 const gum = c => navigator.mediaDevices.getUserMedia(c);
 
-function toast(msg) {
+function toast(msg, ms = 2800) {
   const t = el('div', 'toast', msg);
   $('toasts').append(t);
-  setTimeout(() => t.classList.add('out'), 2800);
-  setTimeout(() => t.remove(), 3200);
+  setTimeout(() => t.classList.add('out'), ms);
+  setTimeout(() => t.remove(), ms + 400);
 }
 
 async function copyText(text) {
@@ -111,15 +112,32 @@ function inviteLink(r) {
   return base + '#room=' + encodeURIComponent(r.name) + '&key=' + encodeURIComponent(r.key);
 }
 
+// Tapping Invite copies the link straight away, then offers sharing through apps.
+let sheetRoom = null;
 async function invite(r) {
   const url = inviteLink(r);
-  const text = `Join my "${r.name}" video room:\n${url}\n\nAnyone with this link can join, so only share it with the people in the room.`;
-  if (navigator.share) {
-    try { await navigator.share({ text }); return; }
-    catch (e) { if (e && e.name === 'AbortError') return; }
-  }
-  toast(await copyText(url) ? 'Invite link copied' : 'Could not copy the link');
+  const copied = await copyText(url);
+  sheetRoom = r;
+  $('sheetTitle').textContent = copied ? 'Invite link copied' : 'Copy this invite link';
+  $('sheetSub').textContent = copied
+    ? `Send it to the people in "${r.name}". Anyone with the link can join this room.`
+    : `Select it and copy it, then send it to the people in "${r.name}".`;
+  $('sheetLink').value = url;
+  $('sheetShare').hidden = !navigator.share;
+  $('sheetBack').hidden = false;
+  $('sheet').hidden = false;
+  if (!copied) { $('sheetLink').focus(); $('sheetLink').select(); }
 }
+function closeSheet() { $('sheet').hidden = true; $('sheetBack').hidden = true; sheetRoom = null; }
+$('sheetDone').addEventListener('click', closeSheet);
+$('sheetBack').addEventListener('click', closeSheet);
+$('sheetLink').addEventListener('focus', e => e.target.select());
+$('sheetShare').addEventListener('click', async () => {
+  if (!sheetRoom) return;
+  const text = `Join my "${sheetRoom.name}" video room:\n${inviteLink(sheetRoom)}`;
+  try { await navigator.share({ text }); closeSheet(); } catch {}
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(); });
 
 /* -------------------------------------------------------------- navigation */
 
@@ -130,6 +148,7 @@ function show(s) {
   for (const id of SCREENS) $(id).hidden = id !== s;
   current = s;
   document.body.dataset.screen = s;
+  if (!$('sheet').hidden) closeSheet();
   window.scrollTo(0, 0);
 }
 function push(s) { history.pushState({ s }, ''); show(s); }
@@ -375,6 +394,7 @@ function openLobby(r, invited) {
   push('lobby');
   applyToggles();
   startMedia();
+  checkNetwork().then(showNetWarning);
 }
 
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.target.blur(); $('joinBtn').click(); } });
@@ -430,6 +450,7 @@ async function startCall(r) {
   timer = setInterval(updateMeta, 1000);
   layout();
   watchRelays();
+  checkNetwork(true).then(() => { sendState(); renderDetails(); });
   try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
 }
 
@@ -438,6 +459,8 @@ function leaveCall() {
   inCall = false;
   try { room && room.leave(); } catch {}
   room = null; stateAction = null; callRoom = null;
+  failures.clear();
+  $('details').hidden = true;
   for (const p of peers.values()) { p.ui.video.srcObject = null; p.ui.root.remove(); }
   peers.clear();
   clearInterval(timer); clearInterval(relayTimer);
@@ -461,13 +484,13 @@ document.addEventListener('visibilitychange', async () => {
 
 function sendState(target) {
   if (!stateAction) return;
-  const msg = { n: data.name, m: micOn, c: camOn };
+  const msg = { n: data.name, m: micOn, c: camOn, nt: netType || undefined };
   stateAction.send(msg, target ? { target } : undefined).catch(() => {});
 }
 
 function onPeerJoin(peerId) {
   if (!inCall || peers.has(peerId)) return;
-  const p = { name: '', mic: true, cam: true, stream: null, ui: makeTile(), announced: false };
+  const p = { name: '', mic: true, cam: true, stream: null, ui: makeTile(), announced: false, net: '', path: '' };
   peers.set(peerId, p);
   $('grid').append(p.ui.root);
   renderTile(p);
@@ -510,6 +533,7 @@ function onPeerState(peerId, msg) {
   p.name = clean(msg.n).slice(0, 30) || 'Someone';
   p.mic = msg.m !== false;
   p.cam = msg.c !== false;
+  if (typeof msg.nt === 'string' && Object.prototype.hasOwnProperty.call(NET_LABEL, msg.nt)) p.net = msg.nt;
   if (!p.announced) { p.announced = true; toast(p.name + ' joined'); }
   renderTile(p);
 }
@@ -519,7 +543,12 @@ function onRoomError(err) {
   if (err.code === 'room-full' && peers.size === 0) {
     toast(`This room is full (${MAX_PEOPLE} people at most)`);
   } else if (err.code === 'peer-connect-failed') {
-    toast('Could not reach someone directly. One of you may be on a network that blocks calls; try other wifi or mobile data.');
+    const key = err.peerId || String(Date.now());
+    if (failures.has(key)) return;
+    const why = failureReason();
+    failures.set(key, why);
+    toast('Someone could not connect. ' + why, 7000);
+    renderDetails();
   }
 }
 
@@ -569,6 +598,7 @@ function layout() {
   $('self').classList.toggle('full', n === 0);
   $('alone').hidden = n > 0 || !inCall;
   updateMeta();
+  renderDetails();
 }
 
 function updateMeta() {
@@ -624,9 +654,119 @@ function tuneBitrate() {
   }
 }
 
+/* ------------------------------------------------------- network check */
+
+// Classify this network the way it matters for direct calls, using the same
+// public STUN servers the calls use (they only tell a device its public address).
+//   open:    the router keeps one public address per device; direct calls work with almost anyone
+//   strict:  the public address changes per destination (common on mobile data and offices);
+//            works with open networks, usually fails with another strict one
+//   blocked: no public address at all; this network blocks direct calls
+const NET_LABEL = {
+  open: 'Open: direct calls work with almost anyone.',
+  strict: 'Strict: calls work with people on normal home networks, but can fail with another strict network (some mobile data, offices).',
+  blocked: 'Blocked: direct calls only work with people on this same network. For anyone else, switch to mobile data or another wifi.'
+};
+let netType = '', netChecked = 0, netCheck = null;
+
+function checkNetwork(force) {
+  if (netCheck) return netCheck;
+  if (!force && netType && Date.now() - netChecked < 60000) return Promise.resolve(netType);
+  netCheck = probe().then(t => { netType = t; netChecked = Date.now(); netCheck = null; return t; });
+  return netCheck;
+}
+
+async function probe() {
+  let pc;
+  try {
+    pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] });
+    pc.createDataChannel('probe');
+    const found = [];
+    const done = new Promise(res => {
+      const t = setTimeout(res, 4000);
+      pc.onicecandidate = e => { if (!e.candidate) { clearTimeout(t); res(); } else found.push(e.candidate); };
+    });
+    await pc.setLocalDescription(await pc.createOffer());
+    await done;
+    const mapped = found.filter(c => (c.type || (c.candidate.match(/ typ (\w+)/) || [])[1]) === 'srflx');
+    if (!mapped.length) return 'blocked';
+    const ports = {};
+    for (const c of mapped) {
+      const addr = c.address || c.candidate.split(' ')[4];
+      const port = c.port || c.candidate.split(' ')[5];
+      (ports[addr] = ports[addr] || new Set()).add(String(port));
+    }
+    return Object.values(ports).some(p => p.size > 1) ? 'strict' : 'open';
+  } catch {
+    return '';
+  } finally {
+    try { pc && pc.close(); } catch {}
+  }
+}
+
+function showNetWarning(t) {
+  const w = $('netWarn');
+  w.hidden = !(t === 'blocked' && current === 'lobby');
+  w.textContent = 'This network blocks direct calls, so you may not be able to connect. Mobile data or another wifi usually works.';
+}
+
+const failures = new Map();   // peerId -> reason
+
+function failureReason() {
+  if (netType === 'blocked') return 'Your network blocks direct calls. Switch to mobile data or another wifi.';
+  if (netType === 'strict') return 'Both networks are strict. One of you should switch to home wifi or another network.';
+  if (netType === 'open') return 'Their network blocks direct calls. They should switch to mobile data or another wifi.';
+  return 'One of the networks blocks direct calls. Try mobile data or another wifi.';
+}
+
+// Which path a working connection uses: inside the same network, or across the internet.
+async function connectionPath(peerId) {
+  let pc = null;
+  try { const info = room && room.getPeers()[peerId]; pc = info && info.connection; } catch {}
+  if (!pc) return '';
+  try {
+    const stats = await pc.getStats();
+    let pair = null;
+    stats.forEach(s => { if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId); });
+    if (!pair) stats.forEach(s => { if (s.type === 'candidate-pair' && (s.selected || (s.nominated && s.state === 'succeeded'))) pair = pair || s; });
+    if (!pair) return '';
+    const l = stats.get(pair.localCandidateId), r = stats.get(pair.remoteCandidateId);
+    if (!l || !r) return '';
+    if (l.candidateType === 'relay' || r.candidateType === 'relay') return 'relayed';
+    return l.candidateType === 'host' && r.candidateType === 'host' ? 'same network' : 'over the internet';
+  } catch { return ''; }
+}
+
+async function renderDetails() {
+  if ($('details').hidden) return;
+  $('detailsNet').textContent = 'Your network: ' + (NET_LABEL[netType] || 'checking…');
+  const list = $('detailsList');
+  const items = [];
+  for (const [id, p] of peers) {
+    const path = await connectionPath(id);
+    const li = el('li', '', p.name || 'Someone');
+    const sub = path ? 'Direct connection, ' + path : (p.stream ? 'Connected' : 'Connecting…');
+    const theirs = p.net ? ' · their network: ' + p.net : '';
+    li.append(el('span', 'd-sub', sub + theirs));
+    items.push(li);
+  }
+  for (const why of failures.values()) {
+    const li = el('li', '', 'Someone could not connect');
+    li.append(el('span', 'd-sub', why));
+    items.push(li);
+  }
+  if (!items.length) items.push(el('li', '', 'Nobody else is here yet.'));
+  list.replaceChildren(...items);
+}
+
+$('whoBtn').addEventListener('click', () => { $('details').hidden = false; renderDetails(); });
+$('detailsClose').addEventListener('click', () => { $('details').hidden = true; });
+$('details').addEventListener('click', e => { if (e.target === $('details')) $('details').hidden = true; });
+
 /* -------------------------------------------------------------------- boot */
 
 history.replaceState({ s: 'home' }, '');
+$('ver').textContent = 'Version ' + VERSION;
 renderHome();
 
 // Opened from an invite link: read it, then wipe it from the address bar.

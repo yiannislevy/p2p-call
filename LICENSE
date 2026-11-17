@@ -1,0 +1,16 @@
+Copyright (c) 2026 yiannislevy. All rights reserved.
+
+This repository is published so its source can be read. No license is granted.
+
+You may not use, copy, modify, merge, publish, distribute, sublicense, sell, host,
+or create derivative works from any part of this software, in whole or in part,
+without prior written permission from the copyright holder.
+
+Making this repository public on GitHub grants only the limited rights that
+GitHub's Terms of Service require (viewing the repository and forking it on
+GitHub). It grants no other rights.
+
+Third-party code in the vendor/ folder (Trystero and @noble/secp256k1) remains
+under its own MIT license; see vendor/LICENSES.txt.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
