@@ -3,6 +3,21 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.6.1
+
+Fixes:
+
+- Refreshing the page no longer loses the room. Before joining, you stay on that room's
+  screen (invites included). In a call, the app rejoins on its own with your mute and camera
+  state, and the others see "Reconnecting…" for a moment instead of you leaving and joining.
+  The room is remembered in that browser tab only, and forgotten when the tab closes.
+- Closing the tab mid-call: the others now drop you within about 20 seconds (it can't be told
+  apart from a refresh, so they wait briefly first).
+- Someone in the room for a while could miss people who joined later. The app now notices
+  people whose phones say they are in the room but who are not connected, rejoins to pick
+  them up (at most twice), and otherwise says once who can't connect and why. Connection
+  details list them.
+
 ## v1.6.0
 
 - Tap your own small video to swap it with the big one (in a group, you take the big spot);
