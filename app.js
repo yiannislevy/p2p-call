@@ -471,6 +471,8 @@ const REPAIR_MS = 10000;         // dropped but still in the room after this lon
 const MAX_WAIT_MS = 180000;      // never keep a "Reconnecting…" tile longer than this
 const AWAY_GRACE_MS = 20000;     // closed or refreshed their page: this long to come back
 const DOWN_MS = 12000;           // all our links dead this long (the library's own repair had its chance): rejoin
+const RECHECK_MS = 15000;        // while someone dropped is still in the room, look again this often
+const REJOIN_GAP_MS = 8000;      // spacing between our own rejoins (grows with each one, up to 30 s)
 let room = null, stateAction = null, callRoom = null, callId = '', inCall = false;
 let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0, healthTimer = 0, speakTimer = 0;
 let mySession = '', selfReconnecting = false, rejoining = false, downSince = 0, rejoinAt = 0, rejoins = 0;
@@ -621,7 +623,7 @@ function markReconnecting(p) {
     // Their phone still says "here": keep waiting (and keep repairing), up to a limit.
     if (aliveInCall.has(p.sess) && Date.now() - p.since < MAX_WAIT_MS) {
       if (mySession < p.sess && !rejoining && (p.repairs || 0) < MAX_TRIES) { p.repairs = (p.repairs || 0) + 1; rejoin(true); }
-      p.grace = setTimeout(decide, 15000);
+      p.grace = setTimeout(decide, RECHECK_MS);
       return;
     }
     removePerson(p, false);
@@ -748,7 +750,7 @@ async function rejoin(repairing) {
   try { await old.leave(); } catch {}
   if (inCall) joinCallRoom();
   downSince = 0;
-  rejoinAt = Date.now() + Math.min(30000, 8000 * rejoins);
+  rejoinAt = Date.now() + Math.min(30000, REJOIN_GAP_MS * rejoins);
   rejoining = false;
 }
 
