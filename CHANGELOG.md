@@ -3,6 +3,15 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.6.0
+
+- Tap your own small video to swap it with the big one (in a group, you take the big spot);
+  tap again to swap back. Someone joining or leaving returns to the normal view.
+- Keyboard on computers: M mute, V camera, S swap, I invite (copies the link), D connection
+  details, Esc closes. Ignored while typing and with Ctrl/Cmd. Buttons show their key on hover.
+- Fixed: leaving a call and joining the same room again straight away could fail with
+  "Could not join" (since v1.3.0). Joining now waits for the previous call to finish leaving.
+
 ## v1.5.0
 
 - See who is talking: the tile of whoever is speaking gets a thin blue outline, and your own
