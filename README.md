@@ -79,7 +79,10 @@ What to know:
 - A direct connection is needed. It works on almost all home networks and most mobile
   data, but some office, hotel or public wifi blocks it. The app tells you when your
   network blocks calls and which side to switch to mobile data or another wifi.
-- There is no ringing or notifications: people join when they open the room.
+- There is no ringing or notifications: people join when they open the room. The rooms
+  screen shows who is already in.
+- Dropped connections (switching wifi to mobile data, a tunnel) reconnect on their own; the
+  others see "Reconnecting…" rather than you leaving.
 
 ## Development
 
@@ -102,7 +105,9 @@ npm test          # builds, starts a local relay, runs every test
 
 **Tests** cover a three-person call (video, names, mute and camera state, leaving and
 the back gesture), invite links, a wrong password never meeting the room, names and room
-names never running as code, who-is-in showing and clearing live (and staying unreadable
+names never running as code, reconnecting after a dropped connection (two and three people,
+without duplicate tiles or false "left" messages, and removing someone who never comes back),
+who-is-in showing and clearing live (and staying unreadable
 to the relays and invisible to other passwords), the app only talking to its own site and the relays,
 refusing to run inside a frame, and the new version still calling the previous release.
 

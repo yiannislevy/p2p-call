@@ -3,6 +3,17 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.3.0
+
+- Auto-reconnect. Switching from wifi to mobile data, a tunnel or a weak signal no longer
+  ends the call: the app repairs broken links on its own and, if every link stays dead,
+  quietly rejoins the room. Your screen shows "Reconnecting…", then "Reconnected".
+- The others keep your tile with "Reconnecting…" instead of seeing you leave and join again.
+  If your phone is gone for good, you are removed once it stops saying "here" in the room.
+- If a link between two people cannot come back while both are still in the room, one of
+  them quietly re-establishes it, so nobody ends up unable to see someone.
+- Leaving with the button is still shown to everyone straight away.
+
 ## v1.2.0
 
 - See who is in a call before joining: rooms with people in them show their initials,
