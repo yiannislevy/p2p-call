@@ -13,7 +13,7 @@ const RELAY = 'ws://localhost:7777';
 mkdirSync(ROOT, { recursive: true });
 
 const build = (...a) => execFileSync('node', ['scripts/build.mjs', ...a, '--relay', RELAY], { stdio: 'inherit' });
-build('--out', join(ROOT, 'current'));
+build('--out', join(ROOT, 'current'), '--fast-timers');
 
 // Previous release, to prove the new version can still call people who haven't updated.
 const current = (readFileSync('app.js', 'utf8').match(/const VERSION = '([^']+)'/) || [])[1];

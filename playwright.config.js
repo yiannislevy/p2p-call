@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: 'tests',
   timeout: 120000,
   workers: 1,
+  fullyParallel: true,   // lets CI split the tests evenly across its parallel jobs
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['github']] : 'list',
   webServer: {

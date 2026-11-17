@@ -12,11 +12,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const args = Object.fromEntries(
-  process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), [])
+  process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--')
+    ? [...acc, [a.slice(2), all[i + 1] && !all[i + 1].startsWith('--') ? all[i + 1] : true]]
+    : acc), [])
 );
 const out = args.out || '_site';
 const ref = args.ref || '';
 const relay = args.relay || '';
+// Test builds only: the same logic with short waits, so tests about expiry and grace periods
+// take seconds instead of minutes. Production builds never pass this.
+const fastTimers = 'fast-timers' in args;
+const FAST = {
+  'presence.js': { HEARTBEAT_MS: 3000, EXPIRE_MS: 9000, SWEEP_MS: 1000 },
+  'app.js': { GRACE_MS: 6000, REPAIR_MS: 3000, MAX_WAIT_MS: 30000, AWAY_GRACE_MS: 5000, DOWN_MS: 5000,
+    RECHECK_MS: 3000, REJOIN_GAP_MS: 2000, UNSEEN_MS: 4000 }
+};
 
 // Everything the site needs: top-level page files plus vendor/. Tooling is left out.
 const isSiteFile = f => /\.(html|js|css|webmanifest|png)$/.test(f) && !/^(playwright\.config)\.js$/.test(f);
@@ -57,6 +67,19 @@ if (relay) {
   app = app.replace(/const RELAYS = \[[^\]]*\];/s, `const RELAYS = [${JSON.stringify(relay)}];`);
   html = html.replace(/connect-src [^;]*;/, `connect-src ${relay};`);
   if (!app.includes(JSON.stringify(relay)) || !html.includes(`connect-src ${relay};`)) throw new Error('Could not point the build at the test relay');
+}
+
+function speedUp(file, text) {
+  for (const [name, ms] of Object.entries(FAST[file] || {})) {
+    const re = new RegExp(`(const ${name} = )\\d+;`);
+    if (!re.test(text)) throw new Error(`${file}: ${name} not found for --fast-timers`);
+    text = text.replace(re, `$1${ms};`);
+  }
+  return text;
+}
+if (fastTimers) {
+  app = speedUp('app.js', app);
+  if (files.includes('presence.js')) writeFileSync(join(out, 'presence.js'), speedUp('presence.js', readFileSync(join(out, 'presence.js'), 'utf8')));
 }
 
 writeFileSync(join(out, 'app.js'), app);
