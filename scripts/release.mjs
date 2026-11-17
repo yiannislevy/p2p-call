@@ -9,8 +9,25 @@ const version = (readFileSync('app.js', 'utf8').match(/const VERSION = '(\d+\.\d
 if (!version) throw new Error('No VERSION in app.js');
 const tag = `v${version}`;
 
-// One-time backfill: v1.0.0 is the first upload, which was never tagged.
 const git = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim();
+
+// Keep every release tag on the commit that shipped it on main ("vX.Y.Z: ..." in the subject;
+// v1.0.0 is the first commit). Repairs tags if main's history is ever rewritten.
+const shipped = new Map([['v1.0.0', git('rev-list', '--max-parents=0', 'HEAD').split('\n')[0]]]);
+for (const line of git('log', '--format=%H %s', 'HEAD').split('\n')) {
+  const m = line.match(/^([0-9a-f]{40}) (v\d+\.\d+\.\d+):/);
+  if (m && !shipped.has(m[2])) shipped.set(m[2], m[1]);
+}
+for (const [name, sha] of shipped) {
+  let now = '';
+  try { now = git('rev-list', '-n', '1', name); } catch {}
+  if (!now || now === sha) continue;
+  git('tag', '-f', name, sha);
+  execFileSync('git', ['push', '--force', 'origin', `refs/tags/${name}`], { stdio: 'inherit' });
+  console.log(`Moved ${name} to ${sha.slice(0, 7)}`);
+}
+
+// One-time backfill: v1.0.0 is the first upload, which was never tagged.
 if (!git('tag', '--list', 'v1.0.0')) {
   const first = git('rev-list', '--max-parents=0', 'HEAD').split('\n')[0];
   execFileSync('gh', ['release', 'create', 'v1.0.0', '--title', 'v1.0.0', '--notes', 'First release.', '--target', first], { stdio: 'inherit' });
