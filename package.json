@@ -1,0 +1,15 @@
+{
+  "name": "p2p-call",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs --out _site",
+    "test": "playwright test",
+    "check-version": "node scripts/check-version.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "ws": "8.23.0"
+  }
+}
