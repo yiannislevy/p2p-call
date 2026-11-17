@@ -107,18 +107,18 @@
 <!-- In call -->
 <section id="call" class="screen" hidden>
   <div id="grid" data-n="0"></div>
-  <video id="self" class="mirror" autoplay playsinline muted></video>
+  <video id="self" class="mirror" autoplay playsinline muted title="Swap views (S)"></video>
   <div id="alone">
     <p id="aloneTitle">Connecting…</p>
     <p id="aloneSub"></p>
     <button class="btn light" id="aloneInvite" type="button"><svg class="ic"><use href="#i-share"/></svg>Invite people</button>
   </div>
   <header id="callTop">
-    <button class="who" id="whoBtn" type="button" aria-label="Connection details">
+    <button class="who" id="whoBtn" type="button" aria-label="Connection details" title="Connection details (D)">
       <span id="callRoom"></span>
       <span class="meta-row"><span id="callMeta"></span><svg class="ic"><use href="#i-info"/></svg></span>
     </button>
-    <button class="btn ghost" id="topInvite" type="button" aria-label="Invite people"><svg class="ic"><use href="#i-share"/></svg>Invite</button>
+    <button class="btn ghost" id="topInvite" type="button" aria-label="Invite people" title="Invite people (I)"><svg class="ic"><use href="#i-share"/></svg>Invite</button>
   </header>
   <button class="btn light" id="tapAudio" type="button" hidden>Tap to turn on sound</button>
   <div id="details" hidden>
@@ -126,14 +126,15 @@
       <p class="details-title" id="detailsTitle">Connection</p>
       <p class="details-net" id="detailsNet"></p>
       <ul id="detailsList"></ul>
+      <p class="details-keys" id="detailsKeys" hidden>Keys: M mute · V camera · S swap views · I invite · D details · Esc close</p>
       <button class="btn light" id="detailsClose" type="button">Close</button>
     </div>
   </div>
   <nav id="bar">
-    <button class="ctl" id="cMic" type="button"><span class="ring"><svg class="ic on"><use href="#i-mic"/></svg><svg class="ic off"><use href="#i-mic-off"/></svg></span><span class="lb">Mute</span></button>
-    <button class="ctl" id="cCam" type="button"><span class="ring"><svg class="ic on"><use href="#i-cam"/></svg><svg class="ic off"><use href="#i-cam-off"/></svg></span><span class="lb">Camera</span></button>
-    <button class="ctl" id="cFlip" type="button" hidden><span class="ring"><svg class="ic"><use href="#i-flip"/></svg></span><span class="lb">Flip</span></button>
-    <button class="ctl end" id="cLeave" type="button"><span class="ring"><svg class="ic"><use href="#i-leave"/></svg></span><span class="lb">Leave</span></button>
+    <button class="ctl" id="cMic" type="button" title="Mute or unmute (M)"><span class="ring"><svg class="ic on"><use href="#i-mic"/></svg><svg class="ic off"><use href="#i-mic-off"/></svg></span><span class="lb">Mute</span></button>
+    <button class="ctl" id="cCam" type="button" title="Camera on or off (V)"><span class="ring"><svg class="ic on"><use href="#i-cam"/></svg><svg class="ic off"><use href="#i-cam-off"/></svg></span><span class="lb">Camera</span></button>
+    <button class="ctl" id="cFlip" type="button" title="Flip camera" hidden><span class="ring"><svg class="ic"><use href="#i-flip"/></svg></span><span class="lb">Flip</span></button>
+    <button class="ctl end" id="cLeave" type="button" title="Leave the call"><span class="ring"><svg class="ic"><use href="#i-leave"/></svg></span><span class="lb">Leave</span></button>
   </nav>
 </section>
 

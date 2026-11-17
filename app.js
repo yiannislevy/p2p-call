@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -333,6 +333,7 @@ function applyToggles() {
   $('previewOff').textContent = v ? 'Camera is off' : (local ? 'No camera' : 'Starting camera…');
   $('self').classList.toggle('cam-off', !(v && camOn));
   if (!micOn) $('self').classList.remove('speaking');   // never show ourselves talking while muted
+  if (swapped) { swapped.me.classList.toggle('muted', !micOn); if (!micOn) swapped.me.classList.remove('speaking'); }
 }
 
 async function updateFlip() {
@@ -439,12 +440,14 @@ const DOWN_MS = 12000;           // all our links dead this long (the library's 
 let room = null, stateAction = null, callRoom = null, callId = '', inCall = false;
 let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0, healthTimer = 0, speakTimer = 0;
 let mySession = '', selfReconnecting = false, rejoining = false, downSince = 0, rejoinAt = 0, rejoins = 0;
+let pendingLeave = Promise.resolve();
 let aliveInCall = new Set();     // call sessions the room's presence notes say are still here
 const people = new Map();        // session id (or 'peer:<id>' for older versions) -> person
 const byPeer = new Map();        // connection (peer id) -> person
 
 async function startCall(r) {
   const id = await roomId(r);
+  await pendingLeave;                 // a call we just left is still saying goodbye
   if (current !== 'lobby') return;   // went back while hashing
   callRoom = r;
   callId = id;
@@ -488,11 +491,13 @@ function joinCallRoom() {
 
 function leaveCall() {
   if (!inCall) return;
+  unswap();
   inCall = false;
   const old = room, st = stateAction;
   // Tell the others this is a real goodbye, not a dropped connection, then leave.
   if (st) st.send({ n: data.name, m: micOn, c: camOn, s: mySession, bye: true }).catch(() => {});
-  setTimeout(() => { try { old && old.leave(); } catch {} }, 300);
+  // Joining the same room again waits for this to finish (it would otherwise collide).
+  pendingLeave = new Promise(res => setTimeout(res, 300)).then(() => old && old.leave()).catch(() => {});
   if (callRoom) presence.leave(callRoom);
   room = null; stateAction = null; callRoom = null;
   failures.clear();
@@ -747,7 +752,9 @@ async function watchSpeaking() {
         selfEnergy = { e, d };
       }
     } else selfEnergy = null;
-    $('self').classList.toggle('speaking', inCall && micOn && people.size > 0 && Date.now() - selfSpokeAt < SPEAK_HOLD_MS);
+    const selfTalking = inCall && micOn && people.size > 0 && Date.now() - selfSpokeAt < SPEAK_HOLD_MS;
+    $('self').classList.toggle('speaking', selfTalking);
+    if (swapped) swapped.me.classList.toggle('speaking', selfTalking);
   } catch {} finally {
     speakBusy = false;
   }
@@ -788,6 +795,7 @@ function makeTile() {
   const name = el('span');
   tag.append(icon('mic-off'), name);
   root.append(video, ph, tag);
+  root.addEventListener('click', () => { if (root.classList.contains('as-pip')) unswap(); });
   // Double tap: switch between filling the tile and showing the whole picture.
   let last = 0;
   root.addEventListener('pointerup', () => {
@@ -810,12 +818,69 @@ function renderTile(p) {
 
 function layout() {
   const n = people.size;
+  if (swapped && n !== swapped.count) unswap();   // someone joined or left: back to the normal view
   $('grid').dataset.n = String(Math.min(n, 5));
   $('self').classList.toggle('full', n === 0);
   $('alone').hidden = n > 0 || !inCall;
   updateMeta();
   renderDetails();
 }
+
+/* swap: tap your own small video to swap it with the big one, tap again to swap back */
+
+let swapped = null;   // { me: your tile in the grid, other: their tile shown small, count }
+
+function swapView() {
+  if (!inCall || !people.size) return;
+  if (swapped) { unswap(); return; }
+  const grid = $('grid');
+  const other = grid.firstElementChild;   // the biggest tile
+  if (!other) return;
+  const me = el('div', 'tile me');
+  const tag = el('div', 'tag');
+  tag.append(icon('mic-off'), el('span', '', 'You'));
+  me.classList.toggle('muted', !micOn);
+  grid.insertBefore(me, other);
+  me.append($('self'), tag);              // the live video moves and keeps playing
+  other.classList.add('as-pip');
+  $('call').insertBefore(other, $('alone'));
+  swapped = { me, other, count: people.size };
+  $('call').classList.add('swapped');
+}
+
+function unswap() {
+  if (!swapped) return;
+  const { me, other } = swapped;
+  swapped = null;
+  $('call').classList.remove('swapped');
+  other.classList.remove('as-pip');
+  const stillHere = [...people.values()].some(p => p.ui.root === other);
+  if (stillHere) $('grid').insertBefore(other, me.parentNode === $('grid') ? me : $('grid').firstElementChild);
+  else other.remove();
+  $('call').insertBefore($('self'), $('alone'));
+  me.remove();
+}
+
+$('self').addEventListener('click', swapView);
+
+/* keyboard (computers): M mute, V camera, S swap, I invite, D details, Esc close */
+
+document.addEventListener('keydown', e => {
+  if (!inCall || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'escape') { if (!$('details').hidden) $('details').hidden = true; return; }
+  if (!$('sheet').hidden) return;   // the invite panel is open
+  if (k === 'm') $('cMic').click();
+  else if (k === 'v') $('cCam').click();
+  else if (k === 's') swapView();
+  else if (k === 'i') $('topInvite').click();
+  else if (k === 'd') { if ($('details').hidden) $('whoBtn').click(); else $('details').hidden = true; }
+  else return;
+  e.preventDefault();
+});
+$('detailsKeys').hidden = !matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 function updateMeta() {
   if (!inCall) return;
