@@ -110,7 +110,8 @@ npm test          # builds, starts a local relay, runs every test
 the back gesture), invite links, a wrong password never meeting the room, names and room
 names never running as code, reconnecting after a dropped connection (two and three people,
 without duplicate tiles or false "left" messages, and removing someone who never comes back),
-who is talking (and never a muted person), quality settings per group size (and kept after flipping the camera), who-is-in showing and clearing live (and staying unreadable
+swapping views and keyboard shortcuts (and that they stay out of the way while typing),
+leaving and rejoining straight away, who is talking (and never a muted person), quality settings per group size (and kept after flipping the camera), who-is-in showing and clearing live (and staying unreadable
 to the relays and invisible to other passwords), the app only talking to its own site and the relays,
 refusing to run inside a frame, and the new version still calling the previous release.
 

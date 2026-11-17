@@ -75,3 +75,18 @@ test('camera and microphone can be switched off before joining', async ({ browse
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });
+
+test('leaving and joining the same room again straight away works', async ({ browser }) => {
+  const a = await person(browser), b = await person(browser);
+  const link = await createRoom(a.page, 'family');
+  await joinFromLink(b.page, link, 'Sarra');
+  for (let round = 0; round < 3; round++) {
+    await joinFromHome(a.page, 'family', 'Yianni');
+    await playingVideos(a.page).toBe(1);
+    await a.page.click('#cLeave');
+    await expect(a.page.locator('#home')).toBeVisible();
+  }
+  await expect(a.page.locator('#lobbyErr')).toHaveText('');
+  expectClean(a, b);
+  await a.context.close(); await b.context.close();
+});
