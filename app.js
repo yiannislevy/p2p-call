@@ -714,6 +714,7 @@ function linkStates() {
 function checkHealth() {
   if (!inCall || !room || rejoining) return;
   checkUnseen();
+  renderDetails();   // keeps the connection details current while they are open
   const states = linkStates();
   const anyUp = states.some(s => s === 'connected');
   const allDown = people.size > 0 && states.every(s => s === 'disconnected' || s === 'failed' || s === 'closed' || s === 'gone');
@@ -817,11 +818,13 @@ function checkUnseen() {
   const now = Date.now();
   const linked = new Set([...people.values()].map(p => p.sess).filter(Boolean));
   const here = new Map(roomMembers.filter(m => m.cs && m.cs !== mySession).map(m => [m.cs, m.name]));
-  for (const cs of [...unseen.keys()]) if (!here.has(cs) || linked.has(cs)) unseen.delete(cs);
+  let gone = false;
+  for (const cs of [...unseen.keys()]) if (!here.has(cs) || linked.has(cs)) { unseen.delete(cs); gone = true; }
+  if (gone) renderDetails();
   for (const [cs, name] of here) {
     if (linked.has(cs)) continue;
     let u = unseen.get(cs);
-    if (!u) { u = { name, first: now, since: now, tries: 0, told: false }; unseen.set(cs, u); renderDetails(); }
+    if (!u) { u = { name, first: now, since: now, tries: 0, told: false }; unseen.set(cs, u); }
     u.name = name;
     // Still not connected after a while: say so once (retries may still pick them up).
     if (!u.told && now - u.first >= UNSEEN_MS * 2) {
@@ -1153,7 +1156,10 @@ async function renderDetails() {
     if (video) li.append(el('span', 'd-sub', 'Video: ' + video));
     items.push(li);
   }
-  for (const u of unseen.values()) {
+  const linked = new Set([...people.values()].map(p => p.sess).filter(Boolean));
+  for (const [cs, u] of unseen) {
+    // Only once it lasts: someone just arriving is briefly in the room before connecting.
+    if (linked.has(cs) || Date.now() - u.first < 5000) continue;
     const li = el('li', '', u.name);
     li.append(el('span', 'd-sub', u.told ? 'In the room, but can\'t connect to you. ' + failureReason() : 'In the room, connecting…'));
     items.push(li);
