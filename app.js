@@ -4,6 +4,7 @@
 // that introduction is encrypted with the room password, so relays learn nothing useful.
 
 import { joinRoom, getRelaySockets } from './vendor/trystero-0.27.0.js';
+import { createPresence, roomKeyOf } from './presence.js';
 
 // Refuse to run inside someone else's frame (clickjacking).
 if (window.top !== window.self) {
@@ -13,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -24,6 +25,7 @@ const RELAYS = [                            // must match connect-src in index.h
   'wss://nostr.azzamo.net'
 ];
 const MAX_PEOPLE = 6;
+const presence = createPresence({ relays: RELAYS, appId: APP_ID });
 const STORE_KEY = 'plaincall.v1';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -150,6 +152,7 @@ function show(s) {
   document.body.dataset.screen = s;
   if (!$('sheet').hidden) closeSheet();
   window.scrollTo(0, 0);
+  syncWatching();
 }
 function push(s) { history.pushState({ s }, ''); show(s); }
 function back() {
@@ -187,11 +190,16 @@ function renderHome() {
   $('homeEmpty').hidden = data.rooms.length > 0;
   $('editBtn').hidden = data.rooms.length === 0;
   $('editBtn').textContent = editing ? 'Done' : 'Edit';
+  rowRefs.clear();
   for (const r of data.rooms) {
     const li = el('li', 'room');
     const main = el('button', 'main');
     main.type = 'button';
-    main.append(el('div', 'name', r.name), el('div', 'sub', editing ? '' : 'Tap to join'));
+    const sub = el('div', 'sub', editing ? '' : 'Tap to join');
+    main.append(el('div', 'name', r.name), sub);
+    const faces = el('span', 'faces');
+    faces.hidden = true;
+    if (!editing) rowRefs.set(roomKeyOf(r), { sub, faces, li });
     main.addEventListener('click', () => { if (!editing) openLobby(r, false); });
     if (editing) {
       const del = el('button', 'icon-btn del');
@@ -210,10 +218,12 @@ function renderHome() {
       inv.setAttribute('aria-label', 'Invite people to ' + r.name);
       inv.append(icon('share'));
       inv.addEventListener('click', () => invite(r));
-      li.append(main, inv);
+      li.append(main, faces, inv);
     }
     list.append(li);
   }
+  for (const [rk, names] of presenceNow) showPresence(rk, names);
+  syncWatching();
 }
 
 $('editBtn').addEventListener('click', () => { editing = !editing; renderHome(); });
@@ -381,6 +391,7 @@ let lobbyRoom = null;
 function openLobby(r, invited) {
   lobbyRoom = { name: r.name, key: r.key, invited };
   $('lobbyTitle').textContent = r.name;
+  $('lobbyWho').hidden = true;
   $('lobbyLead').textContent = invited
     ? 'You have been invited to this room. Check your camera and sound, then join.'
     : 'Check your camera and sound, then join.';
@@ -443,6 +454,7 @@ async function startCall(r) {
   room.onError(onRoomError);
 
   inCall = true;
+  presence.announce(r, () => data.name);
   history.replaceState({ s: 'call' }, '');
   show('call');
   $('callRoom').textContent = r.name;
@@ -458,6 +470,7 @@ function leaveCall() {
   if (!inCall) return;
   inCall = false;
   try { room && room.leave(); } catch {}
+  if (callRoom) presence.leave(callRoom);
   room = null; stateAction = null; callRoom = null;
   failures.clear();
   $('details').hidden = true;
@@ -475,7 +488,7 @@ function leaveCall() {
 $('cLeave').addEventListener('click', back);
 $('aloneInvite').addEventListener('click', () => callRoom && invite(callRoom));
 $('topInvite').addEventListener('click', () => callRoom && invite(callRoom));
-addEventListener('pagehide', () => { try { room && room.leave(); } catch {} });
+addEventListener('pagehide', () => { presence.leaveAll(); try { room && room.leave(); } catch {} });
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && inCall && !wakeLock) {
     try { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } catch {}
@@ -762,6 +775,60 @@ async function renderDetails() {
 $('whoBtn').addEventListener('click', () => { $('details').hidden = false; renderDetails(); });
 $('detailsClose').addEventListener('click', () => { $('details').hidden = true; });
 $('details').addEventListener('click', e => { if (e.target === $('details')) $('details').hidden = true; });
+
+/* ---------------------------------------------------------------- presence */
+
+// Who is in each room's call right now, shown on the rooms screen and before joining.
+const presenceNow = new Map();   // roomKey -> names in that call
+const rowRefs = new Map();       // roomKey -> elements of that room's row
+
+function initials(name) {
+  const words = String(name).trim().split(/\s+/).filter(Boolean);
+  return (words.slice(0, 2).map(w => Array.from(w)[0]).join('') || '?').toUpperCase();
+}
+
+function whoText(names) {
+  if (names.length === 1) return `${names[0]} is in the call`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are in the call`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more are in the call`;
+}
+
+function showPresence(rk, names) {
+  const row = rowRefs.get(rk);
+  if (row) {
+    row.li.classList.toggle('busy', names.length > 0);
+    row.sub.textContent = names.length ? whoText(names) : 'Tap to join';
+    row.faces.hidden = !names.length;
+    row.faces.replaceChildren(
+      ...names.slice(0, 3).map(n => el('span', 'face', initials(n))),
+      ...(names.length > 3 ? [el('span', 'face more', '+' + (names.length - 3))] : []),
+      el('span', 'dot')
+    );
+    row.faces.setAttribute('aria-label', names.length ? whoText(names) : '');
+  }
+  if (lobbyRoom && current === 'lobby' && roomKeyOf(lobbyRoom) === rk) {
+    $('lobbyWho').hidden = !names.length;
+    $('lobbyWho').textContent = names.length ? whoText(names) : '';
+  }
+}
+
+function onPresence(rk, names) {
+  if (names.length) presenceNow.set(rk, names); else presenceNow.delete(rk);
+  showPresence(rk, names);
+}
+
+// Only watch while the rooms screen (or the screen before joining) is open and visible.
+function syncWatching() {
+  const visible = document.visibilityState === 'visible';
+  let rooms = [];
+  if (visible && current === 'home') rooms = data.rooms;
+  else if (visible && current === 'lobby' && lobbyRoom) rooms = [lobbyRoom];
+  if (!rooms.length) { presence.unwatch(); presenceNow.clear(); return; }
+  const keep = new Set(rooms.map(roomKeyOf));
+  for (const rk of [...presenceNow.keys()]) if (!keep.has(rk)) presenceNow.delete(rk);
+  presence.watch(rooms, onPresence).catch(() => {});
+}
+document.addEventListener('visibilitychange', syncWatching);
 
 /* -------------------------------------------------------------------- boot */
 
