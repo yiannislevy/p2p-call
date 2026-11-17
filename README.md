@@ -42,6 +42,12 @@ On iPhone, open it in Safari, then Share, then **Add to Home Screen** to use it 
    between the devices only, encrypted with DTLS-SRTP, which browsers do not allow
    to be switched off. Nothing passes through, or is stored on, any server.
 
+3. **Who is in.** While someone is in a call, their phone posts a small "here" note every
+   25 seconds (and "bye" when leaving) through the same relays, on a second channel derived
+   from the room password and encrypted with it. The rooms screen asks "anyone here?" and
+   shows the answers as initials with a blue dot. Relays see only scrambled notes; only
+   people with the room's link can read who is in.
+
 The site itself is a handful of static files on GitHub Pages. GitHub only hands out the
 page; it never sees a call.
 
@@ -56,6 +62,8 @@ page; it never sees a call.
 - A strict Content Security Policy blocks injected scripts, and the page refuses to run
   inside other websites' frames.
 - Names and room names are always shown as plain text.
+- "Who is in" notes are encrypted with the room password and signed with a throwaway key
+  per session, so they cannot be read or linked to a person by the relays.
 - Rooms and your name are stored only on your device; "Forget all rooms" removes them.
 - Kept out of search engines.
 
@@ -80,7 +88,8 @@ Everything runs as static files; there is no build framework.
 | File | What it is |
 | --- | --- |
 | `index.html`, `style.css`, `app.js` | The app |
-| `vendor/` | Pinned copy of Trystero (connection library) |
+| `presence.js` | Who is in each room, over encrypted relay notes |
+| `vendor/` | Pinned copies of Trystero (connections) and its signing library |
 | `scripts/build.mjs` | Builds the deployable site, ties every file to its version |
 | `tests/` | Browser tests with fake cameras and a local relay |
 | `.github/workflows/` | Test, deploy and rollback |
@@ -93,7 +102,8 @@ npm test          # builds, starts a local relay, runs every test
 
 **Tests** cover a three-person call (video, names, mute and camera state, leaving and
 the back gesture), invite links, a wrong password never meeting the room, names and room
-names never running as code, the app only talking to its own site and the relays,
+names never running as code, who-is-in showing and clearing live (and staying unreadable
+to the relays and invisible to other passwords), the app only talking to its own site and the relays,
 refusing to run inside a frame, and the new version still calling the previous release.
 
 **Releases.** Every change to the app raises `VERSION` in `app.js` and adds a section to

@@ -3,6 +3,15 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.2.0
+
+- See who is in a call before joining: rooms with people in them show their initials,
+  a blue dot and "Sarra and Mama are in the call", live, on the rooms screen and on the
+  screen before joining.
+- Works without any server or direct connection: people in a call post small notes through
+  the same relays, encrypted with the room password, so relays cannot read who is in.
+- Someone whose phone loses signal disappears from the list on their own within about a minute.
+
 ## v1.1.0
 
 - Invite now copies the link at once. A small panel shows the link, with a separate

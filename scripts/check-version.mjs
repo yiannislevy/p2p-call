@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 const base = process.argv[2] || 'origin/main';
 const git = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim();
 
-const APP_FILES = /^(index\.html|app\.js|style\.css|manifest\.webmanifest|icon-\d+\.png|vendor\/)/;
+const APP_FILES = /^(?!playwright\.config\.js$)([\w-]+\.(html|js|css|webmanifest|png)|vendor\/)/;
 const changed = git('diff', '--name-only', `${base}...HEAD`).split('\n').filter(Boolean);
 const appChanged = changed.filter(f => APP_FILES.test(f));
 
