@@ -12,6 +12,7 @@ import { schnorr } from './vendor/noble-secp256k1-3.2.0.js';
 
 export const HEARTBEAT_MS = 25000;   // how often someone in a call says "still here"
 export const EXPIRE_MS = 70000;      // forget someone who has gone quiet this long
+const SWEEP_MS = 5000;               // how often to check for people who went quiet
 const MAX_SKEW_S = 120;              // ignore notes older (or newer) than this
 const REPLY_GAP_MS = 2000;           // answer "anyone here?" at most this often
 
@@ -193,7 +194,7 @@ export function createPresence({ relays, appId }) {
         for (const [id, m] of ch.members) if (m.last < cutoff) { ch.members.delete(id); gone = true; }
         if (gone) changed(ch);
       }
-    }, 5000);
+    }, SWEEP_MS);
   }
 
   async function sayHere(ch) {

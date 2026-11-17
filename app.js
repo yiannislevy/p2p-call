@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.6.1';
+const VERSION = '1.6.2';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -381,11 +381,26 @@ $('cCam').addEventListener('click', () => { camOn = !camOn; applyToggles(); send
 $('cFlip').addEventListener('click', () => swapTrack('video', facing === 'user' ? 'environment' : 'user'));
 $('retryMedia').addEventListener('click', startMedia);
 
-// iOS stops the camera when the app goes to the background. Bring it back.
+// iOS stops (or silences) the camera and microphone when the app goes to the background.
+// Tell the others, and bring our tracks back when we return.
 document.addEventListener('visibilitychange', async () => {
+  if (inCall) sendState();
   if (document.visibilityState !== 'visible' || !local) return;
-  for (const t of local.getTracks()) if (t.readyState === 'ended') await swapTrack(t.kind, facing);
+  await recoverLocalTracks(true);
 });
+
+// A track that ended, or has delivered nothing for a while although we are visible, is
+// replaced with a fresh one from the camera or microphone (the others get it seamlessly).
+async function recoverLocalTracks(now) {
+  if (!local || swapping || document.visibilityState !== 'visible') return;
+  for (const t of local.getTracks()) {
+    if (t.readyState === 'ended') { await swapTrack(t.kind, facing); continue; }
+    if (t.muted) {
+      t.__mutedSince = t.__mutedSince || Date.now();
+      if (now ? Date.now() - t.__mutedSince > 1500 : Date.now() - t.__mutedSince > 4000) await swapTrack(t.kind, facing);
+    } else t.__mutedSince = 0;
+  }
+}
 
 /* ------------------------------------------------------------------- lobby */
 
@@ -471,10 +486,13 @@ const REPAIR_MS = 10000;         // dropped but still in the room after this lon
 const MAX_WAIT_MS = 180000;      // never keep a "Reconnecting…" tile longer than this
 const AWAY_GRACE_MS = 20000;     // closed or refreshed their page: this long to come back
 const DOWN_MS = 12000;           // all our links dead this long (the library's own repair had its chance): rejoin
+const RECHECK_MS = 15000;        // while someone dropped is still in the room, look again this often
+const REJOIN_GAP_MS = 8000;      // spacing between our own rejoins (grows with each one, up to 30 s)
 let room = null, stateAction = null, callRoom = null, callId = '', inCall = false;
 let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0, healthTimer = 0, speakTimer = 0;
 let mySession = '', selfReconnecting = false, rejoining = false, downSince = 0, rejoinAt = 0, rejoins = 0;
 let pendingLeave = Promise.resolve();
+let resendAction = null;
 let aliveInCall = new Set();     // call sessions the room's presence notes say are still here
 let roomMembers = [];            // [{ name, cs }] from those notes
 const unseen = new Map();        // call session -> { name, since, tries, told }: in the room, not connected to us
@@ -523,6 +541,9 @@ function joinCallRoom() {
   stateAction = me.makeAction('st');
   stateAction.onReceive(ctx => ctx.byteLength <= 512);
   stateAction.onMessage((msg, { peerId }) => { if (live()) onPeerState(peerId, msg); });
+  resendAction = me.makeAction('rs');
+  resendAction.onReceive(ctx => ctx.byteLength <= 64);
+  resendAction.onMessage((msg, { peerId }) => { if (live()) resendTo(peerId); });
   me.onPeerJoin(({ peerId }) => { if (live()) onPeerJoin(peerId); });
   me.onPeerLeave(({ peerId }) => { if (live()) onPeerLeave(peerId); });
   me.onPeerStream((stream, { peerId }) => { if (live()) onPeerStream(peerId, stream); });
@@ -580,7 +601,12 @@ document.addEventListener('visibilitychange', async () => {
 
 function sendState(target) {
   if (!stateAction) return;
-  const msg = { n: data.name, m: micOn, c: camOn, nt: netType || undefined, s: mySession };
+  const msg = {
+    n: data.name, m: micOn, c: camOn, nt: netType || undefined, s: mySession,
+    hv: !!(local && local.getVideoTracks()[0]),   // we have a camera to send
+    ha: !!(local && local.getAudioTracks()[0]),   // we have a microphone to send
+    bg: document.visibilityState === 'hidden'     // in another app (iPhone pauses the camera then)
+  };
   stateAction.send(msg, target ? { target } : undefined).catch(() => {});
 }
 
@@ -621,7 +647,7 @@ function markReconnecting(p) {
     // Their phone still says "here": keep waiting (and keep repairing), up to a limit.
     if (aliveInCall.has(p.sess) && Date.now() - p.since < MAX_WAIT_MS) {
       if (mySession < p.sess && !rejoining && (p.repairs || 0) < MAX_TRIES) { p.repairs = (p.repairs || 0) + 1; rejoin(true); }
-      p.grace = setTimeout(decide, 15000);
+      p.grace = setTimeout(decide, RECHECK_MS);
       return;
     }
     removePerson(p, false);
@@ -642,6 +668,7 @@ function onPeerJoin(peerId) {
   if (!inCall || byPeer.has(peerId)) return;
   const p = newPerson('peer:' + peerId);
   p.peerId = peerId;
+  p.linkedAt = Date.now();
   byPeer.set(peerId, p);
   if (local) room.addStream(local, { target: peerId }).catch(() => {});
   sendState(peerId);
@@ -677,6 +704,8 @@ function onPeerState(peerId, msg) {
       // The same person on a new connection: keep their tile, drop the temporary one.
       if (known.peerId && known.peerId !== peerId) byPeer.delete(known.peerId);
       known.peerId = peerId;
+      known.linkedAt = Date.now();
+      known.rx = null; known.starvedSince = 0; known.asks = 0;
       byPeer.set(peerId, known);
       const stream = p.stream;
       p.peerId = null;
@@ -697,9 +726,70 @@ function onPeerState(peerId, msg) {
   p.leaving = msg.bye === true;
   p.away = msg.away === true;
   if (typeof msg.nt === 'string' && Object.prototype.hasOwnProperty.call(NET_LABEL, msg.nt)) p.net = msg.nt;
+  p.hasVideo = msg.hv !== false;
+  p.hasAudio = msg.ha !== false;
+  p.bg = msg.bg === true;
   if (!p.announced && !p.leaving) { p.announced = true; toast(p.name + ' joined'); }
   renderTile(p);
   layout();
+}
+
+// Media watchdog: a connection can be up while someone's video or sound never arrives (or
+// stops). If nothing comes in for a while from someone who is sending it, ask them to send
+// their camera and microphone to us again. Spaced out and limited, so it never loops.
+const STARVED_MS = 6000;
+const ASK_GAP_MS = 12000;
+let mediaBusy = false;
+
+async function watchMedia() {
+  if (mediaBusy || !room) return;
+  mediaBusy = true;
+  try {
+    let all = {};
+    try { all = room.getPeers(); } catch {}
+    const now = Date.now();
+    for (const p of people.values()) {
+      const pc = p.peerId && all[p.peerId] && all[p.peerId].connection;
+      if (!pc || pc.connectionState !== 'connected' || p.reconnecting) { p.starvedSince = 0; continue; }
+      // A video that the browser paused (sound blocked until a tap) would look black and silent.
+      if (p.ui.video.paused && p.ui.video.srcObject) p.ui.video.play().catch(() => { $('tapAudio').hidden = false; });
+      if (now - (p.linkedAt || 0) < STARVED_MS) continue;
+      const rx = { v: 0, a: 0 };
+      (await pc.getStats()).forEach(s => {
+        if (s.type === 'inbound-rtp' && s.kind === 'video') rx.v += s.bytesReceived || 0;
+        if (s.type === 'inbound-rtp' && s.kind === 'audio') rx.a += s.bytesReceived || 0;
+      });
+      const prev = p.rx || { v: -1, a: -1 };
+      p.rx = rx;
+      const videoStuck = p.hasVideo !== false && p.cam && rx.v <= prev.v;
+      const audioStuck = p.hasAudio !== false && rx.a <= prev.a;   // sound keeps flowing even when muted
+      // Their app is in the background and its camera paused (iPhone): show that, don't ask.
+      const stalled = videoStuck && prev.v >= 0;
+      if (stalled !== !!p.videoStalled) { p.videoStalled = stalled; renderTile(p); }
+      if (p.bg) { p.starvedSince = 0; continue; }
+      if (!videoStuck && !audioStuck) { p.starvedSince = 0; p.asks = 0; continue; }
+      p.starvedSince = p.starvedSince || now;
+      if (now - p.starvedSince < STARVED_MS || now - (p.askedAt || 0) < ASK_GAP_MS || (p.asks || 0) >= 3) continue;
+      p.askedAt = now;
+      p.asks = (p.asks || 0) + 1;
+      if (resendAction) resendAction.send({ k: 1 }, { target: p.peerId }).catch(() => {});
+      const v = p.ui.video;
+      if (v.paused && v.srcObject) v.play().catch(() => { $('tapAudio').hidden = false; });
+    }
+  } catch {} finally {
+    mediaBusy = false;
+  }
+}
+
+// Someone isn't getting our camera or microphone: send them again, to that person only.
+const lastResend = new Map();
+async function resendTo(peerId) {
+  if (!room || !local) return;
+  if (Date.now() - (lastResend.get(peerId) || 0) < 5000) return;
+  lastResend.set(peerId, Date.now());
+  try { room.removeStream(local, { target: peerId }); } catch {}
+  try { await room.addStream(local, { target: peerId }); } catch {}
+  setTimeout(tuneBitrate, 1500);
 }
 
 // Our own connection. The connection library repairs a single broken link by itself within
@@ -713,6 +803,8 @@ function linkStates() {
 
 function checkHealth() {
   if (!inCall || !room || rejoining) return;
+  watchMedia();
+  recoverLocalTracks(false);
   checkUnseen();
   renderDetails();   // keeps the connection details current while they are open
   const states = linkStates();
@@ -748,7 +840,7 @@ async function rejoin(repairing) {
   try { await old.leave(); } catch {}
   if (inCall) joinCallRoom();
   downSince = 0;
-  rejoinAt = Date.now() + Math.min(30000, 8000 * rejoins);
+  rejoinAt = Date.now() + Math.min(30000, REJOIN_GAP_MS * rejoins);
   rejoining = false;
 }
 
@@ -890,10 +982,12 @@ function makeTile() {
 
 function renderTile(p) {
   const vt = p.stream && p.stream.getVideoTracks()[0];
-  const showVideo = !!(vt && p.cam) && !p.reconnecting;
+  const away = p.bg && p.videoStalled;   // in another app and its camera paused
+  const showVideo = !!(vt && p.cam) && !p.reconnecting && !away;
   p.ui.ph.hidden = showVideo;
   p.ui.avatar.textContent = (p.name || '?').charAt(0).toUpperCase();
-  p.ui.status.textContent = p.reconnecting ? 'Reconnecting…' : !p.stream ? 'Connecting…' : (!p.cam || !vt ? 'Camera off' : '');
+  p.ui.status.textContent = p.reconnecting ? 'Reconnecting…' : !p.stream ? 'Connecting…'
+    : away ? 'In another app' : (!p.cam || !vt ? 'Camera off' : '');
   p.ui.name.textContent = p.name || '…';
   p.ui.root.classList.toggle('muted', !p.mic);
   p.ui.root.classList.toggle('reconnecting', p.reconnecting);
