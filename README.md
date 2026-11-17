@@ -1,59 +1,112 @@
 # Call
 
-Private video rooms for family and friends. Video and audio go directly between
-phones, encrypted end to end. There is no server: GitHub only hands out these files.
+Private video calls for family and friends, straight from browser to browser.
+No accounts, no app store, no server in between. Video and audio are encrypted end to end.
 
-## Put it online (once, about 5 minutes)
+**Live:** https://yiannislevy.github.io/p2p-call/
 
-1. Create a free GitHub account if you don't have one.
-2. New repository, name it e.g. `call`, Public, then "uploading an existing file":
-   drag in everything from this folder (keep the `vendor` folder as it is).
-3. Repository Settings → Pages → Source: "Deploy from a branch", branch `main`, folder `/ (root)`, Save.
-4. After a minute the site is at `https://<your-username>.github.io/call/`.
+This is a personal project, built for one family and a few friends. It is public so the
+code can be read and checked, not for reuse (see [License](#license)).
 
-## Use it
+## Try it
 
-- Open the site, tap **Add a room**, name it (`family`), keep the generated password, Save.
-- Tap the share icon next to the room and send the link to the people in that room.
-- They open the link, type their name, tap **Join call**. The room is saved on their phone too.
-- To call: open the app, tap the room. Whoever else opens it at the same time is in the call.
+You need two devices, or a friend.
 
-**On iPhone, make it an app:** open the site in Safari → Share → Add to Home Screen.
-It then opens full screen with its own icon. Allow camera and microphone the first time.
+1. Open the site, tap **Add a room**, give it any name, keep the generated password, **Save room**.
+2. Tap the share icon next to the room. The invite link is copied; send it to the other device.
+3. Both sides open the room, type a name and tap **Join call**.
 
-## How safe is it
+Rooms are private: without the exact name and password nobody can find or join them,
+so trying it out never puts you in someone else's call.
 
-- The room name and password never leave the phone. The page turns them into a
-  random-looking meeting point with a slow hash (PBKDF2), so the public relays that
-  introduce phones to each other never learn the room name, and people without the
-  password never find the room.
-- The introduction itself is encrypted with the password (AES-256-GCM), so a relay
-  cannot read it or slip in between you.
-- Video and audio use WebRTC encryption (DTLS-SRTP). It cannot be turned off.
-- No accounts, no analytics, nothing loaded from other websites. The connection
-  library (Trystero 0.27.0, MIT) is copied into `vendor/` and pinned.
-- A strict Content-Security-Policy blocks injected scripts, and the page refuses to
-  run inside other websites' frames. Names and room names are only ever shown as text.
-- Rooms and your name are stored only on your device. "Forget all rooms on this
-  device" removes them.
+On iPhone, open it in Safari, then Share, then **Add to Home Screen** to use it like an app.
 
-Things to know:
+## How it works
 
-- The invite link contains the password. Anyone who has it can join that room. If a
-  link leaks, make a new room and send the new link.
-- People in a call can see each other's IP address, as with any direct connection.
-- Use the generated passwords. A short one like `123` could collide with a stranger's room.
+```
+   your phone                                        their phone
+  ┌──────────┐   1. "anyone in room a91f3c…?"   ┌──────────┐
+  │          │ ──────► public relays ◄───────── │          │
+  │   Call   │       (encrypted handshake)      │   Call   │
+  │          │                                  │          │
+  │          │ ◄══════════════════════════════► │          │
+  └──────────┘   2. video + audio, direct,      └──────────┘
+                    encrypted end to end
+```
+
+1. **Finding each other.** The room name and password are turned into a random-looking
+   meeting point on the device (PBKDF2-SHA256, 300,000 rounds). Both phones announce
+   themselves there through a few public Nostr relays. The handshake they exchange is
+   encrypted with the room password (AES-256-GCM), so the relays see only noise.
+2. **Talking.** The browsers then connect directly with WebRTC. Video and audio flow
+   between the devices only, encrypted with DTLS-SRTP, which browsers do not allow
+   to be switched off. Nothing passes through, or is stored on, any server.
+
+The site itself is a handful of static files on GitHub Pages. GitHub only hands out the
+page; it never sees a call.
+
+## Privacy and security
+
+- The room name and password never leave the device in readable form.
+- Invite links carry the password after the `#`, a part of the address that browsers never
+  send to any server. The app removes it from the address bar as soon as it is read.
+- No accounts, no tracking, no analytics, nothing loaded from other websites. The one
+  library ([Trystero](https://github.com/dmotz/trystero) 0.27.0, MIT) is copied into
+  `vendor/` and pinned.
+- A strict Content Security Policy blocks injected scripts, and the page refuses to run
+  inside other websites' frames.
+- Names and room names are always shown as plain text.
+- Rooms and your name are stored only on your device; "Forget all rooms" removes them.
+- Kept out of search engines.
+
+What to know:
+
+- **The invite link is the key.** Anyone holding it can join that room. If it leaks,
+  make a new room and send the new link.
+- **People in a call can see each other's IP address**, as with any direct connection.
 
 ## Limits
 
-- Up to 6 people per room. Each phone sends its video to every other phone, so 2–4 is the sweet spot.
-- On some strict networks (some mobile carriers, office or hotel wifi) two phones cannot
-  reach each other directly. The app says so; switching one side to other wifi or mobile
-  data usually fixes it.
-- Calls only ring if the other person has the app open. There are no notifications.
+- Up to 6 people per call; 2 to 4 is the sweet spot, since each phone sends its video to every other phone.
+- A direct connection is needed. It works on almost all home networks and most mobile
+  data, but some office, hotel or public wifi blocks it. The app tells you when your
+  network blocks calls and which side to switch to mobile data or another wifi.
+- There is no ringing or notifications: people join when they open the room.
 
-## Changing relays
+## Development
 
-The six public relays are listed at the top of `app.js` (`RELAYS`) and must also be
-listed in `connect-src` in `index.html`. Only a few kilobytes pass through them when someone joins.
-If several stop working, swap in others from the same Nostr relay family and update both places.
+Everything runs as static files; there is no build framework.
+
+| File | What it is |
+| --- | --- |
+| `index.html`, `style.css`, `app.js` | The app |
+| `vendor/` | Pinned copy of Trystero (connection library) |
+| `scripts/build.mjs` | Builds the deployable site, ties every file to its version |
+| `tests/` | Browser tests with fake cameras and a local relay |
+| `.github/workflows/` | Test, deploy and rollback |
+
+```sh
+npm ci
+npx playwright install chromium
+npm test          # builds, starts a local relay, runs every test
+```
+
+**Tests** cover a three-person call (video, names, mute and camera state, leaving and
+the back gesture), invite links, a wrong password never meeting the room, names and room
+names never running as code, the app only talking to its own site and the relays,
+refusing to run inside a frame, and the new version still calling the previous release.
+
+**Releases.** Every change to the app raises `VERSION` in `app.js` and adds a section to
+`CHANGELOG.md` (a pull request without both fails). Pull requests run all tests; merging
+to `main` runs them again, publishes the site only if they pass, and tags the release.
+The version is shown at the bottom of the rooms screen.
+
+**Rollback.** Actions tab, then **Deploy a version (rollback)**, then **Run workflow**,
+then type a release such as `v1.0.0`. It is live again within a minute; the next merge
+to `main` deploys `main` again.
+
+## License
+
+Copyright (c) 2026 yiannislevy. All rights reserved. The source is visible for reading
+only; no permission is granted to use, copy, modify or redistribute it. See [LICENSE](LICENSE).
+Third-party code in `vendor/` keeps its MIT license.
