@@ -7,7 +7,7 @@ test('the iPhone check page runs its three checks and reports them', async ({ br
   await expect(a.page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/);
 
   await a.page.click('#start');
-  await expect(a.page.locator('#startResult')).toHaveText('Camera and microphone work.');
+  await expect(a.page.locator('#startResult')).toHaveText('Camera and microphone work.', { timeout: 15000 });
   await expect.poll(() => a.page.evaluate(() => document.getElementById('remote').videoWidth), { timeout: 15000 }).toBeGreaterThan(0);
 
   await a.page.click('#pip');
@@ -28,6 +28,9 @@ test('the iPhone check page runs its three checks and reports them', async ({ br
   expect(report.camera).toBe('ok');
   expect(report.background.secondsAway).toBe(3);
   expect(report.pip).toBeTruthy();
+  expect(report.callVideo).toMatch(/^ok/);
+  expect(report.background.callConnection).toBe('connected');
+  expect(report.background.callAudioPacketsPerSecondWhileAway).toBeGreaterThan(20);
 
   expectClean(a);
   await a.context.close();
