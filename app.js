@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -178,6 +178,7 @@ let editing = false;
 let pendingToast = '';
 
 function toHome() {
+  forgetActive();   // back on the rooms screen on purpose: a refresh should stay here
   renderHome();
   show('home');
   if (pendingToast) { toast(pendingToast); pendingToast = ''; }
@@ -390,7 +391,30 @@ document.addEventListener('visibilitychange', async () => {
 
 let lobbyRoom = null;
 
-function openLobby(r, invited) {
+/* Surviving a page refresh: the room being joined (or the call we are in) is remembered in
+   this browser tab only (sessionStorage), and forgotten when the tab closes or we go back. */
+const ACTIVE_KEY = 'plaincall.active';
+function rememberActive(stage) {
+  if (!lobbyRoom) return;
+  try {
+    sessionStorage.setItem(ACTIVE_KEY, JSON.stringify({
+      name: lobbyRoom.name, key: lobbyRoom.key, invited: !!lobbyRoom.invited, stage,
+      session: stage === 'call' ? mySession : '', mic: micOn, cam: camOn
+    }));
+  } catch {}
+}
+function forgetActive() { try { sessionStorage.removeItem(ACTIVE_KEY); } catch {} }
+function recallActive() {
+  try {
+    const a = JSON.parse(sessionStorage.getItem(ACTIVE_KEY) || 'null');
+    if (!a || !validRoom(a) || (a.stage !== 'lobby' && a.stage !== 'call')) return null;
+    if (a.session && !/^[0-9a-f]{8,32}$/.test(a.session)) a.session = '';
+    return a;
+  } catch { return null; }
+}
+
+// resume: a call we were in before a refresh; rejoin it straight away.
+function openLobby(r, invited, resume) {
   lobbyRoom = { name: r.name, key: r.key, invited };
   $('lobbyTitle').textContent = r.name;
   $('lobbyWho').hidden = true;
@@ -403,15 +427,24 @@ function openLobby(r, invited) {
   $('lobbyErr').textContent = '';
   $('joinBtn').disabled = false;
   $('joinBtn').textContent = 'Join call';
-  micOn = true; camOn = true;
+  micOn = resume ? resume.mic !== false : true;
+  camOn = resume ? resume.cam !== false : true;
   push('lobby');
+  rememberActive('lobby');
   applyToggles();
-  startMedia();
+  const media = startMedia();
   checkNetwork().then(showNetWarning);
+  if (resume && data.name) {
+    $('lobbyLead').textContent = 'Rejoining the call…';
+    $('joinBtn').disabled = true;
+    $('joinBtn').textContent = 'Rejoining…';
+    media.then(() => { if (current === 'lobby') join(resume.session); });
+  }
 }
 
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.target.blur(); $('joinBtn').click(); } });
-$('joinBtn').addEventListener('click', async () => {
+$('joinBtn').addEventListener('click', () => join(''));
+async function join(resumeSession) {
   const name = clean($('nameInput').value).slice(0, 30);
   if (!name) { $('lobbyErr').textContent = 'Add your name so the others know who joined.'; $('nameInput').focus(); return; }
   $('lobbyErr').textContent = '';
@@ -421,13 +454,13 @@ $('joinBtn').addEventListener('click', async () => {
   $('joinBtn').disabled = true;
   $('joinBtn').textContent = 'Joining…';
   try {
-    await startCall(lobbyRoom);
+    await startCall(lobbyRoom, resumeSession);
   } catch {
     $('lobbyErr').textContent = 'Could not join. Check your connection and try again.';
     $('joinBtn').disabled = false;
     $('joinBtn').textContent = 'Join call';
   }
-});
+}
 
 /* -------------------------------------------------------------------- call */
 
@@ -436,22 +469,28 @@ $('joinBtn').addEventListener('click', async () => {
 const GRACE_MS = 30000;          // how long a dropped person shows as "Reconnecting…"
 const REPAIR_MS = 10000;         // dropped but still in the room after this long: repair the link
 const MAX_WAIT_MS = 180000;      // never keep a "Reconnecting…" tile longer than this
+const AWAY_GRACE_MS = 20000;     // closed or refreshed their page: this long to come back
 const DOWN_MS = 12000;           // all our links dead this long (the library's own repair had its chance): rejoin
 let room = null, stateAction = null, callRoom = null, callId = '', inCall = false;
 let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0, healthTimer = 0, speakTimer = 0;
 let mySession = '', selfReconnecting = false, rejoining = false, downSince = 0, rejoinAt = 0, rejoins = 0;
 let pendingLeave = Promise.resolve();
 let aliveInCall = new Set();     // call sessions the room's presence notes say are still here
+let roomMembers = [];            // [{ name, cs }] from those notes
+const unseen = new Map();        // call session -> { name, since, tries, told }: in the room, not connected to us
+const UNSEEN_MS = 15000;         // in the room but not connected this long: try to pick them up
+const MAX_TRIES = 2;             // rejoins per such person, so a network that can't connect never makes us flap
 const people = new Map();        // session id (or 'peer:<id>' for older versions) -> person
 const byPeer = new Map();        // connection (peer id) -> person
 
-async function startCall(r) {
+async function startCall(r, resumeSession) {
   const id = await roomId(r);
   await pendingLeave;                 // a call we just left is still saying goodbye
   if (current !== 'lobby') return;   // went back while hashing
   callRoom = r;
   callId = id;
-  mySession = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
+  // Same session as before a refresh, so the others keep our tile instead of seeing us leave.
+  mySession = resumeSession || Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
   selfReconnecting = false; rejoins = 0; downSince = 0; rejoinAt = 0;
   joinCallRoom();
 
@@ -459,6 +498,7 @@ async function startCall(r) {
   presence.announce(r, () => data.name, () => mySession);
   history.replaceState({ s: 'call' }, '');
   show('call');
+  rememberActive('call');
   $('callRoom').textContent = r.name;
   t0 = Date.now();
   timer = setInterval(updateMeta, 1000);
@@ -491,6 +531,7 @@ function joinCallRoom() {
 
 function leaveCall() {
   if (!inCall) return;
+  forgetActive();
   unswap();
   inCall = false;
   const old = room, st = stateAction;
@@ -505,6 +546,8 @@ function leaveCall() {
   for (const p of people.values()) { clearTimeout(p.grace); clearTimeout(p.repair); p.ui.video.srcObject = null; p.ui.root.remove(); }
   people.clear();
   aliveInCall = new Set();
+  roomMembers = [];
+  unseen.clear();
   byPeer.clear();
   clearInterval(timer); clearInterval(relayTimer); clearInterval(healthTimer); clearInterval(speakTimer);
   $('self').classList.remove('speaking');
@@ -520,9 +563,12 @@ function leaveCall() {
 $('cLeave').addEventListener('click', back);
 $('aloneInvite').addEventListener('click', () => callRoom && invite(callRoom));
 $('topInvite').addEventListener('click', () => callRoom && invite(callRoom));
+// Closing or refreshing the page. We can't tell which, so we say "away" rather than "bye":
+// the others show "Reconnecting…" briefly, and drop us after AWAY_GRACE_MS unless we are back.
 addEventListener('pagehide', () => {
+  if (inCall) rememberActive('call');   // keeps the latest mute and camera state for a refresh
   presence.leaveAll();
-  try { stateAction && stateAction.send({ n: data.name, m: micOn, c: camOn, s: mySession, bye: true }).catch(() => {}); } catch {}
+  try { stateAction && stateAction.send({ n: data.name, m: micOn, c: camOn, s: mySession, away: true }).catch(() => {}); } catch {}
   try { room && room.leave(); } catch {}
 });
 addEventListener('online', () => { if (inCall) { rejoinAt = 0; if (people.size) downSince = Date.now() - DOWN_MS; checkHealth(); } });
@@ -574,13 +620,13 @@ function markReconnecting(p) {
     if (!p.reconnecting || people.get(p.key) !== p) return;
     // Their phone still says "here": keep waiting (and keep repairing), up to a limit.
     if (aliveInCall.has(p.sess) && Date.now() - p.since < MAX_WAIT_MS) {
-      if (mySession < p.sess && !rejoining) rejoin(true);
+      if (mySession < p.sess && !rejoining && (p.repairs || 0) < MAX_TRIES) { p.repairs = (p.repairs || 0) + 1; rejoin(true); }
       p.grace = setTimeout(decide, 15000);
       return;
     }
     removePerson(p, false);
   };
-  p.grace = setTimeout(decide, GRACE_MS);
+  p.grace = setTimeout(decide, p.away ? AWAY_GRACE_MS : GRACE_MS);
 }
 
 function setStream(p, stream) {
@@ -649,6 +695,7 @@ function onPeerState(peerId, msg) {
   p.mic = msg.m !== false;
   p.cam = msg.c !== false;
   p.leaving = msg.bye === true;
+  p.away = msg.away === true;
   if (typeof msg.nt === 'string' && Object.prototype.hasOwnProperty.call(NET_LABEL, msg.nt)) p.net = msg.nt;
   if (!p.announced && !p.leaving) { p.announced = true; toast(p.name + ' joined'); }
   renderTile(p);
@@ -666,6 +713,7 @@ function linkStates() {
 
 function checkHealth() {
   if (!inCall || !room || rejoining) return;
+  checkUnseen();
   const states = linkStates();
   const anyUp = states.some(s => s === 'connected');
   const allDown = people.size > 0 && states.every(s => s === 'disconnected' || s === 'failed' || s === 'closed' || s === 'gone');
@@ -757,6 +805,38 @@ async function watchSpeaking() {
     if (swapped) swapped.me.classList.toggle('speaking', selfTalking);
   } catch {} finally {
     speakBusy = false;
+  }
+}
+
+// Someone's phone says they are in this room, but we have no connection to them at all,
+// e.g. we missed their arrival, or our side of the introductions went quiet. Rejoin to pick
+// them up (the lower session first, the other side later, a couple of times at most); if
+// that doesn't work, it is the networks, so say so once and list them in the details.
+function checkUnseen() {
+  if (!inCall || rejoining) return;
+  const now = Date.now();
+  const linked = new Set([...people.values()].map(p => p.sess).filter(Boolean));
+  const here = new Map(roomMembers.filter(m => m.cs && m.cs !== mySession).map(m => [m.cs, m.name]));
+  for (const cs of [...unseen.keys()]) if (!here.has(cs) || linked.has(cs)) unseen.delete(cs);
+  for (const [cs, name] of here) {
+    if (linked.has(cs)) continue;
+    let u = unseen.get(cs);
+    if (!u) { u = { name, first: now, since: now, tries: 0, told: false }; unseen.set(cs, u); renderDetails(); }
+    u.name = name;
+    // Still not connected after a while: say so once (retries may still pick them up).
+    if (!u.told && now - u.first >= UNSEEN_MS * 2) {
+      u.told = true;
+      toast(`${name} is in the room but can't connect to you. ${failureReason()}`, 8000);
+      renderDetails();
+    }
+    const wait = mySession < cs ? UNSEEN_MS : UNSEEN_MS * 2;
+    if (now - u.since < wait) continue;
+    if (u.tries < MAX_TRIES && now >= rejoinAt) {
+      u.tries++;
+      u.since = now;
+      rejoin(true);
+      return;
+    }
   }
 }
 
@@ -1073,6 +1153,11 @@ async function renderDetails() {
     if (video) li.append(el('span', 'd-sub', 'Video: ' + video));
     items.push(li);
   }
+  for (const u of unseen.values()) {
+    const li = el('li', '', u.name);
+    li.append(el('span', 'd-sub', u.told ? 'In the room, but can\'t connect to you. ' + failureReason() : 'In the room, connecting…'));
+    items.push(li);
+  }
   for (const why of failures.values()) {
     const li = el('li', '', 'Someone could not connect');
     li.append(el('span', 'd-sub', why));
@@ -1122,8 +1207,12 @@ function showPresence(rk, names) {
   }
 }
 
-function onPresence(rk, names, sessions) {
-  if (inCall && callRoom && rk === roomKeyOf(callRoom)) aliveInCall = sessions || new Set();
+function onPresence(rk, names, sessions, members) {
+  if (inCall && callRoom && rk === roomKeyOf(callRoom)) {
+    aliveInCall = sessions || new Set();
+    roomMembers = members || [];
+    checkUnseen();
+  }
   if (names.length) presenceNow.set(rk, names); else presenceNow.delete(rk);
   showPresence(rk, names);
 }
@@ -1149,6 +1238,9 @@ $('ver').textContent = 'Version ' + VERSION;
 renderHome();
 
 // Opened from an invite link: read it, then wipe it from the address bar.
+const resume = !location.hash.startsWith('#room=') && recallActive();
+if (resume) openLobby(resume, resume.invited, resume.stage === 'call' ? resume : null);
+
 if (location.hash.startsWith('#room=')) {
   const params = new URLSearchParams(location.hash.slice(1));
   const r = { name: clean(params.get('room')).slice(0, 40), key: (params.get('key') || '').trim() };

@@ -177,7 +177,10 @@ export function createPresence({ relays, appId }) {
   }
 
   function changed(ch) {
-    if (ch.watched && watchHandler) watchHandler(ch.rk, members(ch), new Set([...ch.members.values()].map(m => m.cs).filter(Boolean)));
+    if (ch.watched && watchHandler) {
+      const list = [...ch.members.values()];
+      watchHandler(ch.rk, members(ch), new Set(list.map(m => m.cs).filter(Boolean)), list.map(m => ({ name: m.name, cs: m.cs })));
+    }
   }
   const members = ch => [...ch.members.values()].map(m => m.name).sort((a, b) => a.localeCompare(b));
 
