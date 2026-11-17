@@ -59,7 +59,7 @@ test('someone in the room who cannot connect is named in the details, without en
   await a.page.click('#detailsClose');
 
   // Said once, calmly: no repeated messages, and Peer C's call carries on as normal.
-  await a.page.waitForTimeout(20000);
+  await a.page.waitForTimeout(10000);
   expect(await a.page.evaluate(() => document.querySelectorAll('.toast').length)).toBeLessThanOrEqual(1);
   await expect(a.page.locator('#callMeta')).toHaveText('Just you');
 

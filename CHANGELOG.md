@@ -3,6 +3,20 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.6.2
+
+Fixes for black video and missing sound:
+
+- If video or sound from someone never arrives, or stops, while the connection is up, the
+  app asks their app to send it again (spaced out, at most three times).
+- A camera or microphone that stops on its own (an iPhone interruption, another app taking
+  the camera) is replaced with a fresh one automatically; the others keep seeing you.
+- Someone in another app whose phone paused their camera is shown as "In another app"
+  instead of a frozen or black picture, and comes back on their own.
+- A video the browser paused is restarted, or "Tap to turn on sound" is offered.
+
+Also: tests run four times faster in CI (parallel jobs, short timers in test builds).
+
 ## v1.6.1
 
 Fixes:
