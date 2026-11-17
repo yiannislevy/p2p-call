@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -429,56 +429,80 @@ $('joinBtn').addEventListener('click', async () => {
 
 /* -------------------------------------------------------------------- call */
 
-let room = null, stateAction = null, callRoom = null, inCall = false;
-let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0;
-const peers = new Map();   // peerId -> { name, mic, cam, stream, ui, announced }
+// People are tracked by a per-call session id, not by connection, so someone whose
+// connection drops and comes back (network switch, tunnel, lift) keeps their tile.
+const GRACE_MS = 30000;          // how long a dropped person shows as "Reconnecting…"
+const REPAIR_MS = 10000;         // dropped but still in the room after this long: repair the link
+const MAX_WAIT_MS = 180000;      // never keep a "Reconnecting…" tile longer than this
+const DOWN_MS = 12000;           // all our links dead this long (the library's own repair had its chance): rejoin
+let room = null, stateAction = null, callRoom = null, callId = '', inCall = false;
+let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0, healthTimer = 0;
+let mySession = '', selfReconnecting = false, rejoining = false, downSince = 0, rejoinAt = 0, rejoins = 0;
+let aliveInCall = new Set();     // call sessions the room's presence notes say are still here
+const people = new Map();        // session id (or 'peer:<id>' for older versions) -> person
+const byPeer = new Map();        // connection (peer id) -> person
 
 async function startCall(r) {
   const id = await roomId(r);
   if (current !== 'lobby') return;   // went back while hashing
   callRoom = r;
-  room = joinRoom({
-    appId: APP_ID,
-    password: r.key,
-    identity: 'none',
-    maxUsers: MAX_PEOPLE,
-    relayConfig: { urls: RELAYS, redundancy: RELAYS.length, warnOnRelayFailure: false }
-  }, id);
-
-  stateAction = room.makeAction('st');
-  stateAction.onReceive(ctx => ctx.byteLength <= 512);
-  stateAction.onMessage((msg, { peerId }) => onPeerState(peerId, msg));
-  room.onPeerJoin(({ peerId }) => onPeerJoin(peerId));
-  room.onPeerLeave(({ peerId }) => onPeerLeave(peerId));
-  room.onPeerStream((stream, { peerId }) => onPeerStream(peerId, stream));
-  room.onError(onRoomError);
+  callId = id;
+  mySession = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
+  selfReconnecting = false; rejoins = 0; downSince = 0; rejoinAt = 0;
+  joinCallRoom();
 
   inCall = true;
-  presence.announce(r, () => data.name);
+  presence.announce(r, () => data.name, () => mySession);
   history.replaceState({ s: 'call' }, '');
   show('call');
   $('callRoom').textContent = r.name;
   t0 = Date.now();
   timer = setInterval(updateMeta, 1000);
+  healthTimer = setInterval(checkHealth, 2000);
   layout();
   watchRelays();
   checkNetwork(true).then(() => { sendState(); renderDetails(); });
   try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
 }
 
+function joinCallRoom() {
+  const me = joinRoom({
+    appId: APP_ID,
+    password: callRoom.key,
+    identity: 'none',
+    maxUsers: MAX_PEOPLE,
+    relayConfig: { urls: RELAYS, redundancy: RELAYS.length, warnOnRelayFailure: false }
+  }, callId);
+  room = me;
+  const live = () => room === me && inCall;   // ignore late events from a room we already left
+  stateAction = me.makeAction('st');
+  stateAction.onReceive(ctx => ctx.byteLength <= 512);
+  stateAction.onMessage((msg, { peerId }) => { if (live()) onPeerState(peerId, msg); });
+  me.onPeerJoin(({ peerId }) => { if (live()) onPeerJoin(peerId); });
+  me.onPeerLeave(({ peerId }) => { if (live()) onPeerLeave(peerId); });
+  me.onPeerStream((stream, { peerId }) => { if (live()) onPeerStream(peerId, stream); });
+  me.onError(err => { if (live()) onRoomError(err); });
+}
+
 function leaveCall() {
   if (!inCall) return;
   inCall = false;
-  try { room && room.leave(); } catch {}
+  const old = room, st = stateAction;
+  // Tell the others this is a real goodbye, not a dropped connection, then leave.
+  if (st) st.send({ n: data.name, m: micOn, c: camOn, s: mySession, bye: true }).catch(() => {});
+  setTimeout(() => { try { old && old.leave(); } catch {} }, 300);
   if (callRoom) presence.leave(callRoom);
   room = null; stateAction = null; callRoom = null;
   failures.clear();
   $('details').hidden = true;
-  for (const p of peers.values()) { p.ui.video.srcObject = null; p.ui.root.remove(); }
-  peers.clear();
-  clearInterval(timer); clearInterval(relayTimer);
+  for (const p of people.values()) { clearTimeout(p.grace); clearTimeout(p.repair); p.ui.video.srcObject = null; p.ui.root.remove(); }
+  people.clear();
+  aliveInCall = new Set();
+  byPeer.clear();
+  clearInterval(timer); clearInterval(relayTimer); clearInterval(healthTimer);
   try { wakeLock && wakeLock.release(); } catch {}
   wakeLock = null;
+  selfReconnecting = false;
   $('tapAudio').hidden = true;
   $('toasts').replaceChildren();
   stopMedia();
@@ -488,7 +512,12 @@ function leaveCall() {
 $('cLeave').addEventListener('click', back);
 $('aloneInvite').addEventListener('click', () => callRoom && invite(callRoom));
 $('topInvite').addEventListener('click', () => callRoom && invite(callRoom));
-addEventListener('pagehide', () => { presence.leaveAll(); try { room && room.leave(); } catch {} });
+addEventListener('pagehide', () => {
+  presence.leaveAll();
+  try { stateAction && stateAction.send({ n: data.name, m: micOn, c: camOn, s: mySession, bye: true }).catch(() => {}); } catch {}
+  try { room && room.leave(); } catch {}
+});
+addEventListener('online', () => { if (inCall) { rejoinAt = 0; if (people.size) downSince = Date.now() - DOWN_MS; checkHealth(); } });
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && inCall && !wakeLock) {
     try { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } catch {}
@@ -497,63 +526,178 @@ document.addEventListener('visibilitychange', async () => {
 
 function sendState(target) {
   if (!stateAction) return;
-  const msg = { n: data.name, m: micOn, c: camOn, nt: netType || undefined };
+  const msg = { n: data.name, m: micOn, c: camOn, nt: netType || undefined, s: mySession };
   stateAction.send(msg, target ? { target } : undefined).catch(() => {});
 }
 
-function onPeerJoin(peerId) {
-  if (!inCall || peers.has(peerId)) return;
-  const p = { name: '', mic: true, cam: true, stream: null, ui: makeTile(), announced: false, net: '', path: '' };
-  peers.set(peerId, p);
+function newPerson(key) {
+  const p = { key, sess: '', name: '', mic: true, cam: true, stream: null, ui: makeTile(), announced: false,
+    net: '', peerId: null, reconnecting: false, leaving: false, grace: 0, repair: 0, since: 0 };
+  people.set(key, p);
   $('grid').append(p.ui.root);
   renderTile(p);
   layout();
-  if (local) room.addStream(local, { target: peerId }).catch(() => {});
-  sendState(peerId);
-  setTimeout(() => { if (peers.get(peerId) === p && !p.announced) { p.announced = true; toast('Someone joined'); } }, 4000);
-  setTimeout(tuneBitrate, 2000);
-  setTimeout(tuneBitrate, 7000);
+  return p;
 }
 
-function onPeerLeave(peerId) {
-  const p = peers.get(peerId);
-  if (!p) return;
+function removePerson(p, quietly) {
+  clearTimeout(p.grace); clearTimeout(p.repair);
+  if (p.peerId) byPeer.delete(p.peerId);
   p.ui.video.srcObject = null;
   p.ui.root.remove();
-  peers.delete(peerId);
-  toast((p.name || 'Someone') + ' left');
+  if (people.get(p.key) === p) people.delete(p.key);
+  if (!quietly && p.announced) toast((p.name || 'Someone') + ' left');
   layout();
   tuneBitrate();
 }
 
-function onPeerStream(peerId, stream) {
-  if (!peers.has(peerId)) onPeerJoin(peerId);
-  const p = peers.get(peerId);
-  if (!p) return;
+function markReconnecting(p) {
+  if (p.reconnecting) return;   // keep the original deadline
+  p.reconnecting = true;
+  p.since = Date.now();
+  renderTile(p);
+  clearTimeout(p.grace); clearTimeout(p.repair);
+  // Still announcing in the room after a while, but our link to them is gone: repair it.
+  // Exactly one side does this (the lower session id), so the two don't keep crossing.
+  p.repair = setTimeout(() => {
+    if (p.reconnecting && people.get(p.key) === p && aliveInCall.has(p.sess) && mySession < p.sess) rejoin(true);
+  }, REPAIR_MS);
+  const decide = () => {
+    if (!p.reconnecting || people.get(p.key) !== p) return;
+    // Their phone still says "here": keep waiting (and keep repairing), up to a limit.
+    if (aliveInCall.has(p.sess) && Date.now() - p.since < MAX_WAIT_MS) {
+      if (mySession < p.sess && !rejoining) rejoin(true);
+      p.grace = setTimeout(decide, 15000);
+      return;
+    }
+    removePerson(p, false);
+  };
+  p.grace = setTimeout(decide, GRACE_MS);
+}
+
+function setStream(p, stream) {
   p.stream = stream;
   const v = p.ui.video;
-  v.srcObject = stream;
+  if (v.srcObject !== stream) v.srcObject = stream;
   v.play().catch(() => { $('tapAudio').hidden = false; });
   stream.addEventListener('addtrack', () => renderTile(p));
   renderTile(p);
 }
 
+function onPeerJoin(peerId) {
+  if (!inCall || byPeer.has(peerId)) return;
+  const p = newPerson('peer:' + peerId);
+  p.peerId = peerId;
+  byPeer.set(peerId, p);
+  if (local) room.addStream(local, { target: peerId }).catch(() => {});
+  sendState(peerId);
+  setTimeout(() => { if (people.get(p.key) === p && !p.announced) { p.announced = true; toast('Someone joined'); } }, 4000);
+  setTimeout(tuneBitrate, 2000);
+  setTimeout(tuneBitrate, 7000);
+}
+
+function onPeerLeave(peerId) {
+  const p = byPeer.get(peerId);
+  byPeer.delete(peerId);
+  if (!p || p.peerId !== peerId) return;   // already back on a newer connection
+  p.peerId = null;
+  if (p.leaving || !p.sess) removePerson(p, false);   // said goodbye, or an older version
+  else markReconnecting(p);
+}
+
+function onPeerStream(peerId, stream) {
+  if (!byPeer.has(peerId)) onPeerJoin(peerId);
+  const p = byPeer.get(peerId);
+  if (p) setStream(p, stream);
+}
+
 function onPeerState(peerId, msg) {
   if (!msg || typeof msg !== 'object' || typeof msg.n !== 'string') return;
-  if (!peers.has(peerId)) onPeerJoin(peerId);
-  const p = peers.get(peerId);
+  if (!byPeer.has(peerId)) onPeerJoin(peerId);
+  let p = byPeer.get(peerId);
   if (!p) return;
+  const sess = typeof msg.s === 'string' && /^[0-9a-f]{8,32}$/.test(msg.s) ? msg.s : '';
+  if (sess && p.key !== sess) {
+    const known = people.get(sess);
+    if (known && known !== p) {
+      // The same person on a new connection: keep their tile, drop the temporary one.
+      if (known.peerId && known.peerId !== peerId) byPeer.delete(known.peerId);
+      known.peerId = peerId;
+      byPeer.set(peerId, known);
+      const stream = p.stream;
+      p.peerId = null;
+      removePerson(p, true);
+      if (stream) setStream(known, stream);
+      p = known;
+    } else {
+      people.delete(p.key);
+      p.key = sess;
+      people.set(sess, p);
+    }
+    p.sess = sess;
+  }
+  if (p.reconnecting) { p.reconnecting = false; clearTimeout(p.grace); clearTimeout(p.repair); }
   p.name = clean(msg.n).slice(0, 30) || 'Someone';
   p.mic = msg.m !== false;
   p.cam = msg.c !== false;
+  p.leaving = msg.bye === true;
   if (typeof msg.nt === 'string' && Object.prototype.hasOwnProperty.call(NET_LABEL, msg.nt)) p.net = msg.nt;
-  if (!p.announced) { p.announced = true; toast(p.name + ' joined'); }
+  if (!p.announced && !p.leaving) { p.announced = true; toast(p.name + ' joined'); }
   renderTile(p);
+  layout();
+}
+
+// Our own connection. The connection library repairs a single broken link by itself within
+// a few seconds. If every link stays dead longer than that (switched wifi to mobile data,
+// lost signal for a while), quietly join the room again from scratch.
+function linkStates() {
+  let all = {};
+  try { all = room ? room.getPeers() : {}; } catch {}
+  return [...byPeer.keys()].map(id => { const pc = all[id] && all[id].connection; return pc ? pc.connectionState : 'gone'; });
+}
+
+function checkHealth() {
+  if (!inCall || !room || rejoining) return;
+  const states = linkStates();
+  const anyUp = states.some(s => s === 'connected');
+  const allDown = people.size > 0 && states.every(s => s === 'disconnected' || s === 'failed' || s === 'closed' || s === 'gone');
+  if (anyUp || !people.size) {
+    downSince = 0;
+    if (![...people.values()].some(p => p.reconnecting)) rejoins = 0;
+    if (selfReconnecting && (anyUp || !people.size)) { selfReconnecting = false; rejoins = 0; if (anyUp) toast('Reconnected'); updateMeta(); }
+    return;
+  }
+  if (!allDown) { downSince = 0; return; }
+  if (!downSince) downSince = Date.now();
+  if (Date.now() - downSince >= DOWN_MS && Date.now() >= rejoinAt) rejoin();
+}
+
+// repairing: we are fine, but a link to someone still in the room could not come back.
+async function rejoin(repairing) {
+  if (!inCall || rejoining) return;
+  if (repairing && Date.now() < rejoinAt) return;
+  rejoining = true;
+  rejoins++;
+  if (!repairing && !selfReconnecting) { selfReconnecting = true; toast('Connection lost. Reconnecting…', 4000); }
+  updateMeta();
+  const old = room;
+  room = null; stateAction = null;
+  for (const p of [...people.values()]) {
+    if (p.peerId) byPeer.delete(p.peerId);
+    p.peerId = null;
+    if (p.sess) markReconnecting(p); else removePerson(p, true);   // older versions rejoin as new tiles
+  }
+  byPeer.clear();
+  try { await old.leave(); } catch {}
+  if (inCall) joinCallRoom();
+  downSince = 0;
+  rejoinAt = Date.now() + Math.min(30000, 8000 * rejoins);
+  rejoining = false;
 }
 
 function onRoomError(err) {
   if (!inCall || !err) return;
-  if (err.code === 'room-full' && peers.size === 0) {
+  if (err.code === 'room-full' && people.size === 0) {
     toast(`This room is full (${MAX_PEOPLE} people at most)`);
   } else if (err.code === 'peer-connect-failed') {
     const key = err.peerId || String(Date.now());
@@ -567,7 +711,7 @@ function onRoomError(err) {
 
 $('tapAudio').addEventListener('click', () => {
   $('tapAudio').hidden = true;
-  for (const p of peers.values()) p.ui.video.play().catch(() => {});
+  for (const p of people.values()) p.ui.video.play().catch(() => {});
 });
 
 /* tiles */
@@ -597,16 +741,17 @@ function makeTile() {
 
 function renderTile(p) {
   const vt = p.stream && p.stream.getVideoTracks()[0];
-  const showVideo = !!(vt && p.cam);
+  const showVideo = !!(vt && p.cam) && !p.reconnecting;
   p.ui.ph.hidden = showVideo;
   p.ui.avatar.textContent = (p.name || '?').charAt(0).toUpperCase();
-  p.ui.status.textContent = !p.stream ? 'Connecting…' : (!p.cam || !vt ? 'Camera off' : '');
+  p.ui.status.textContent = p.reconnecting ? 'Reconnecting…' : !p.stream ? 'Connecting…' : (!p.cam || !vt ? 'Camera off' : '');
   p.ui.name.textContent = p.name || '…';
   p.ui.root.classList.toggle('muted', !p.mic);
+  p.ui.root.classList.toggle('reconnecting', p.reconnecting);
 }
 
 function layout() {
-  const n = peers.size;
+  const n = people.size;
   $('grid').dataset.n = String(Math.min(n, 5));
   $('self').classList.toggle('full', n === 0);
   $('alone').hidden = n > 0 || !inCall;
@@ -616,7 +761,8 @@ function layout() {
 
 function updateMeta() {
   if (!inCall) return;
-  const n = peers.size;
+  if (selfReconnecting) { $('callMeta').textContent = 'Reconnecting…'; return; }
+  const n = people.size;
   if (!n) { $('callMeta').textContent = 'Just you'; return; }
   const s = Math.floor((Date.now() - t0) / 1000);
   const time = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
@@ -648,7 +794,7 @@ function watchRelays() {
 // Give each person a fair share of upload: sharper 1-to-1, lighter in groups.
 function tuneBitrate() {
   if (!room) return;
-  const n = peers.size;
+  const n = people.size;
   if (!n) return;
   const max = n === 1 ? 2500000 : n === 2 ? 1500000 : n === 3 ? 1000000 : 700000;
   let all = {};
@@ -755,10 +901,10 @@ async function renderDetails() {
   $('detailsNet').textContent = 'Your network: ' + (NET_LABEL[netType] || 'checking…');
   const list = $('detailsList');
   const items = [];
-  for (const [id, p] of peers) {
-    const path = await connectionPath(id);
+  for (const p of people.values()) {
+    const path = p.peerId ? await connectionPath(p.peerId) : '';
     const li = el('li', '', p.name || 'Someone');
-    const sub = path ? 'Direct connection, ' + path : (p.stream ? 'Connected' : 'Connecting…');
+    const sub = p.reconnecting ? 'Reconnecting…' : path ? 'Direct connection, ' + path : (p.stream ? 'Connected' : 'Connecting…');
     const theirs = p.net ? ' · their network: ' + p.net : '';
     li.append(el('span', 'd-sub', sub + theirs));
     items.push(li);
@@ -812,7 +958,8 @@ function showPresence(rk, names) {
   }
 }
 
-function onPresence(rk, names) {
+function onPresence(rk, names, sessions) {
+  if (inCall && callRoom && rk === roomKeyOf(callRoom)) aliveInCall = sessions || new Set();
   if (names.length) presenceNow.set(rk, names); else presenceNow.delete(rk);
   showPresence(rk, names);
 }
@@ -823,6 +970,7 @@ function syncWatching() {
   let rooms = [];
   if (visible && current === 'home') rooms = data.rooms;
   else if (visible && current === 'lobby' && lobbyRoom) rooms = [lobbyRoom];
+  else if (current === 'call' && callRoom) rooms = [callRoom];   // tells dropped links from people who left
   if (!rooms.length) { presence.unwatch(); presenceNow.clear(); return; }
   const keep = new Set(rooms.map(roomKeyOf));
   for (const rk of [...presenceNow.keys()]) if (!keep.has(rk)) presenceNow.delete(rk);

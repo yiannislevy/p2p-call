@@ -166,16 +166,18 @@ export function createPresence({ relays, appId }) {
       if (ch.announcing && Date.now() - ch.lastReply > REPLY_GAP_MS) { ch.lastReply = Date.now(); sayHere(ch); }
     } else if (note.t === 'here') {
       const name = typeof note.n === 'string' ? note.n.trim().replace(/\s+/g, ' ').slice(0, 30) : '';
+      const cs = typeof note.cs === 'string' && /^[0-9a-f]{8,32}$/.test(note.cs) ? note.cs : '';
       const had = ch.members.get(note.id);
-      ch.members.set(note.id, { name: name || 'Someone', last: Date.now() });
-      if (!had || had.name !== name) changed(ch);
+      ch.members.set(note.id, { name: name || 'Someone', cs, last: Date.now() });
+      if (!had || had.name !== name || had.cs !== cs) changed(ch);
+      else if (cs && watchHandler) changed(ch);   // keep "still alive" fresh for the call screen
     } else if (note.t === 'bye') {
       if (ch.members.delete(note.id)) changed(ch);
     }
   }
 
   function changed(ch) {
-    if (ch.watched && watchHandler) watchHandler(ch.rk, members(ch));
+    if (ch.watched && watchHandler) watchHandler(ch.rk, members(ch), new Set([...ch.members.values()].map(m => m.cs).filter(Boolean)));
   }
   const members = ch => [...ch.members.values()].map(m => m.name).sort((a, b) => a.localeCompare(b));
 
@@ -194,7 +196,7 @@ export function createPresence({ relays, appId }) {
   async function sayHere(ch) {
     const who = ch.announcing;
     if (!who) return;
-    const here = await seal(ch, { t: 'here', n: who() });
+    const here = await seal(ch, { t: 'here', n: who(), cs: ch.callSession ? ch.callSession() : undefined });
     const bye = await seal(ch, { t: 'bye' });   // kept ready so leaving can be announced instantly
     if (ch.announcing !== who) return;          // left while this note was being prepared
     ch.bye = bye;
@@ -228,9 +230,12 @@ export function createPresence({ relays, appId }) {
   }
 
   // While in a call: tell watchers of this room that we are here.
-  async function announce(room, getName) {
+  // getCallSession tells others in the call which person this is, so they can tell a
+  // dropped link (person still here) from a person who is gone.
+  async function announce(room, getName, getCallSession) {
     const ch = channel(room);
     ch.announcing = getName;
+    ch.callSession = getCallSession || null;
     ensureSockets();
     startSweeper();
     await ch.ready;
