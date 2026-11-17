@@ -13,7 +13,7 @@ const report = () => { $('report').textContent = JSON.stringify(results, null, 2
 const say = (id, text, ok) => { $(id).textContent = text; $(id).className = 'result ' + (ok === true ? 'ok' : ok === false ? 'bad' : ''); };
 report();
 
-let local = null;
+let local = null, rx = null;
 
 /* 1. camera and microphone, sent through a loopback call connection */
 $('start').addEventListener('click', async () => {
@@ -21,15 +21,27 @@ $('start').addEventListener('click', async () => {
     local = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
     $('local').srcObject = local;
     const a = new RTCPeerConnection(), b = new RTCPeerConnection();
-    a.onicecandidate = e => e.candidate && b.addIceCandidate(e.candidate);
-    b.onicecandidate = e => e.candidate && a.addIceCandidate(e.candidate);
-    b.ontrack = e => { $('remote').srcObject = e.streams[0]; $('remote').play().catch(() => {}); };
+    rx = b;
+    const gathered = pc => pc.iceGatheringState === 'complete' ? Promise.resolve() : new Promise(r => {
+      const done = () => { if (pc.iceGatheringState === 'complete') r(); };
+      pc.addEventListener('icegatheringstatechange', done);
+      setTimeout(r, 4000);
+    });
+    const remote = new MediaStream();
+    b.ontrack = e => { remote.addTrack(e.track); $('remote').srcObject = remote; $('remote').play().catch(() => {}); };
     for (const t of local.getTracks()) a.addTrack(t, local);
     await a.setLocalDescription(await a.createOffer());
+    await gathered(a);
     await b.setRemoteDescription(a.localDescription);
     await b.setLocalDescription(await b.createAnswer());
+    await gathered(b);
     await a.setRemoteDescription(b.localDescription);
     results.camera = 'ok';
+    const v = $('remote');
+    const t0 = Date.now();
+    while (v.readyState < 2 && Date.now() - t0 < 10000) await new Promise(r => setTimeout(r, 200));
+    results.callVideo = v.readyState >= 2 ? `ok, ${v.videoWidth}x${v.videoHeight}` : `no picture (connection ${b.connectionState})`;
+    if (v.readyState < 2) { say('startResult', 'Camera works, but the call video did not arrive.', false); report(); return; }
     say('startResult', 'Camera and microphone work.', true);
     $('pip').disabled = false;
     $('bg').disabled = false;
@@ -47,8 +59,7 @@ results.pipApi = {
 };
 report();
 
-$('pip').addEventListener('click', async () => {
-  const v = $('remote');
+async function float(v) {
   try {
     if (v.requestPictureInPicture && document.pictureInPictureEnabled) {
       await v.requestPictureInPicture();
@@ -62,6 +73,16 @@ $('pip').addEventListener('click', async () => {
     }
   } catch (e) {
     results.pip = `${e.name}: ${e.message}`;
+  }
+  results.pip += ` (video ready ${v.readyState}, ${v.videoWidth}x${v.videoHeight})`;
+}
+$('pip').addEventListener('click', async () => {
+  await float($('remote'));
+  results.pipCallVideo = results.pip;
+  if (!results.pip.startsWith('ok')) {
+    await float($('local'));
+    results.pipCameraVideo = results.pip;
+    results.pip = results.pipCallVideo;
   }
   say('pipResult', results.pip.startsWith('ok') ? 'The video floats. Now switch to another app: does it keep moving?' : 'Not allowed: ' + results.pip, results.pip.startsWith('ok'));
   report();
@@ -80,8 +101,9 @@ $('bg').addEventListener('click', () => {
     rec.start(1000);
   } catch (e) { results.recorder = `${e.name}: ${e.message}`; }
   let ticks = 0;
-  const timer = setInterval(() => { ticks++; }, 1000);
-  bgTest = { rec, chunks, timer, ticksAt: () => ticks, hiddenAt: 0, hiddenTicks: 0, videoFrames: 0 };
+  const tickTimes = [];
+  const timer = setInterval(() => { ticks++; if (bgTest && bgTest.hiddenAt) tickTimes.push(Math.round((Date.now() - bgTest.hiddenAt) / 1000)); }, 1000);
+  bgTest = { rec, chunks, timer, tickTimes, ticksAt: () => ticks, hiddenAt: 0, hiddenTicks: 0, videoFrames: 0, recStart: Date.now(), audioIn: null };
   const v = $('remote');
   if (v.requestVideoFrameCallback) {
     const count = () => { if (document.visibilityState === 'hidden') bgTest.videoFrames++; v.requestVideoFrameCallback(count); };
@@ -95,11 +117,14 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'hidden') {
     bgTest.hiddenAt = Date.now();
     bgTest.hiddenTicks = bgTest.ticksAt();
+    bgTest.audioIn = await audioPackets();
     return;
   }
   if (!bgTest.hiddenAt) return;
   const away = (Date.now() - bgTest.hiddenAt) / 1000;
   const ticksAway = bgTest.ticksAt() - bgTest.hiddenTicks;
+  const audioInAfter = await audioPackets();
+  const callAudioPerSecond = bgTest.audioIn == null || audioInAfter == null ? 'unknown' : Math.round((audioInAfter - bgTest.audioIn) / away);
   clearInterval(bgTest.timer);
   let micSeconds = null;
   if (bgTest.rec) {
@@ -109,6 +134,16 @@ document.addEventListener('visibilitychange', async () => {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
       micSeconds = buf.duration;
+      // which seconds while away were pure digital silence (a paused microphone), not room sound
+      const data = buf.getChannelData(0), sr = buf.sampleRate;
+      const from = Math.max(0, (bgTest.hiddenAt - bgTest.recStart) / 1000);
+      let silent = 0, total = 0;
+      for (let s = Math.floor(from); s < Math.min(buf.duration, from + away); s++) {
+        let peak = 0;
+        for (let i = s * sr; i < (s + 1) * sr && i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+        total++; if (peak < 1e-5) silent++;
+      }
+      results.micSecondsSilentWhileAway = `${silent} of ${total}`;
     } catch (e) { results.decode = `${e.name}: ${e.message}`; }
   }
   const tracks = local.getTracks().map(t => `${t.kind}: ${t.readyState}${t.muted ? ', muted' : ''}`);
@@ -116,7 +151,10 @@ document.addEventListener('visibilitychange', async () => {
     secondsAway: Math.round(away),
     pageTimersRanSeconds: ticksAway,
     microphoneRecordedSeconds: micSeconds == null ? 'unknown' : Math.round(micSeconds),
+    pageTickedAtSeconds: bgTest.tickTimes.join(' '),
+    callAudioPacketsPerSecondWhileAway: callAudioPerSecond,
     callVideoFramesWhileAway: bgTest.videoFrames,
+    callConnection: rx ? rx.connectionState : 'none',
     tracksAfterReturn: tracks
   };
   const keptPage = ticksAway >= away * 0.8;
@@ -127,6 +165,15 @@ document.addEventListener('visibilitychange', async () => {
   bgTest = null;
   report();
 });
+
+async function audioPackets() {
+  if (!rx) return null;
+  try {
+    let n = 0;
+    (await rx.getStats()).forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') n += r.packetsReceived || 0; });
+    return n;
+  } catch { return null; }
+}
 
 $('copy').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('report').textContent); $('copy').textContent = 'Copied'; }
