@@ -44,6 +44,7 @@ if (ref) {
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 const files = [...readdirSync(src).filter(isSiteFile), 'vendor'];
+if (existsSync(join(src, 'lab'))) files.push('lab');   // small device-check pages, not part of the app
 for (const f of ['index.html', 'app.js', 'style.css', 'vendor']) if (!files.includes(f) || !existsSync(join(src, f))) throw new Error(`Missing ${f}`);
 for (const f of files) cpSync(join(src, f), join(out, f), { recursive: true });
 

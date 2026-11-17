@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; media-src 'self' blob: mediastream:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="pip.css">
+<script type="module" src="pip.js"></script>
+<title>Call: iPhone check</title>
+</head>
+<body>
+<main>
+  <h1>iPhone check</h1>
+  <p class="lead">Checks what this phone allows a web call to do: float the video, and keep going in another app. Nothing leaves this phone.</p>
+
+  <section>
+    <h2>1. Camera and microphone</h2>
+    <button class="btn primary" id="start" type="button">Start</button>
+    <video id="local" class="mirror" autoplay playsinline muted></video>
+    <p class="result" id="startResult"></p>
+  </section>
+
+  <section>
+    <h2>2. Floating video</h2>
+    <p class="hint">Tries to float a video that comes through a call connection, exactly like a person in a call.</p>
+    <video id="remote" autoplay playsinline muted></video>
+    <button class="btn" id="pip" type="button" disabled>Float the video</button>
+    <p class="result" id="pipResult"></p>
+  </section>
+
+  <section>
+    <h2>3. Another app</h2>
+    <p class="hint">Tap Start below, switch to another app for about 20 seconds, then come back here.</p>
+    <button class="btn" id="bg" type="button" disabled>Start</button>
+    <p class="result" id="bgResult"></p>
+  </section>
+
+  <section>
+    <h2>Results</h2>
+    <pre id="report"></pre>
+    <button class="btn" id="copy" type="button">Copy results</button>
+  </section>
+</main>
+</body>
+</html>
