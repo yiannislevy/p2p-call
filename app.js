@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -332,6 +332,7 @@ function applyToggles() {
   $('previewOff').hidden = !!(v && camOn);
   $('previewOff').textContent = v ? 'Camera is off' : (local ? 'No camera' : 'Starting camera…');
   $('self').classList.toggle('cam-off', !(v && camOn));
+  if (!micOn) $('self').classList.remove('speaking');   // never show ourselves talking while muted
 }
 
 async function updateFlip() {
@@ -436,7 +437,7 @@ const REPAIR_MS = 10000;         // dropped but still in the room after this lon
 const MAX_WAIT_MS = 180000;      // never keep a "Reconnecting…" tile longer than this
 const DOWN_MS = 12000;           // all our links dead this long (the library's own repair had its chance): rejoin
 let room = null, stateAction = null, callRoom = null, callId = '', inCall = false;
-let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0, healthTimer = 0;
+let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0, healthTimer = 0, speakTimer = 0;
 let mySession = '', selfReconnecting = false, rejoining = false, downSince = 0, rejoinAt = 0, rejoins = 0;
 let aliveInCall = new Set();     // call sessions the room's presence notes say are still here
 const people = new Map();        // session id (or 'peer:<id>' for older versions) -> person
@@ -459,6 +460,7 @@ async function startCall(r) {
   t0 = Date.now();
   timer = setInterval(updateMeta, 1000);
   healthTimer = setInterval(checkHealth, 2000);
+  speakTimer = setInterval(watchSpeaking, 250);
   layout();
   watchRelays();
   checkNetwork(true).then(() => { sendState(); renderDetails(); });
@@ -499,7 +501,8 @@ function leaveCall() {
   people.clear();
   aliveInCall = new Set();
   byPeer.clear();
-  clearInterval(timer); clearInterval(relayTimer); clearInterval(healthTimer);
+  clearInterval(timer); clearInterval(relayTimer); clearInterval(healthTimer); clearInterval(speakTimer);
+  $('self').classList.remove('speaking');
   try { wakeLock && wakeLock.release(); } catch {}
   wakeLock = null;
   selfReconnecting = false;
@@ -693,6 +696,61 @@ async function rejoin(repairing) {
   downSince = 0;
   rejoinAt = Date.now() + Math.min(30000, 8000 * rejoins);
   rejoining = false;
+}
+
+// Who is talking: outline their tile. Uses the audio energy the browser already measures
+// for every incoming voice stream, averaged since the last check, so short words between
+// checks still count and nothing extra is sent or processed.
+const SPEAK_LEVEL = 0.02;        // average level about -34 dB: speech, not room noise
+const SPEAK_HOLD_MS = 700;       // keep the outline through short pauses between words
+let selfSpokeAt = 0, selfEnergy = null, speakBusy = false;
+
+// Average level since the previous reading, from cumulative energy and duration.
+function levelSince(prev, energy, duration) {
+  if (!prev || duration <= prev.d) return 0;
+  return Math.sqrt(Math.max(0, energy - prev.e) / (duration - prev.d));
+}
+
+async function watchSpeaking() {
+  if (!inCall || !room || speakBusy) return;
+  speakBusy = true;
+  try {
+    let all = {};
+    try { all = room.getPeers(); } catch {}
+    const now = Date.now();
+    let selfPc = null;
+    for (const p of people.values()) {
+      const pc = p.peerId && all[p.peerId] && all[p.peerId].connection;
+      if (!pc || pc.connectionState !== 'connected') continue;
+      selfPc = selfPc || pc;
+      let e = 0, d = 0, found = false;
+      (await pc.getStats()).forEach(s => {
+        if (s.type === 'inbound-rtp' && s.kind === 'audio' && s.totalSamplesDuration != null) { e += s.totalAudioEnergy || 0; d += s.totalSamplesDuration; found = true; }
+      });
+      if (!found) continue;
+      const level = levelSince(p.energy, e, d);
+      p.energy = { e, d };
+      if (level > SPEAK_LEVEL && p.mic && !p.reconnecting) p.spokeAt = now;
+    }
+    for (const p of people.values()) {
+      const speaking = p.mic && !p.reconnecting && now - (p.spokeAt || 0) < SPEAK_HOLD_MS;
+      if (speaking !== !!p.speaking) { p.speaking = speaking; p.ui.root.classList.toggle('speaking', speaking); }
+    }
+    // Ourselves: what our microphone picks up, only while unmuted and with someone to hear it.
+    if (selfPc && micOn) {
+      let e = 0, d = 0, found = false;
+      (await selfPc.getStats()).forEach(s => {
+        if (s.type === 'media-source' && s.kind === 'audio' && s.totalSamplesDuration != null) { e = s.totalAudioEnergy || 0; d = s.totalSamplesDuration; found = true; }
+      });
+      if (found) {
+        if (levelSince(selfEnergy, e, d) > SPEAK_LEVEL) selfSpokeAt = Date.now();
+        selfEnergy = { e, d };
+      }
+    } else selfEnergy = null;
+    $('self').classList.toggle('speaking', inCall && micOn && people.size > 0 && Date.now() - selfSpokeAt < SPEAK_HOLD_MS);
+  } catch {} finally {
+    speakBusy = false;
+  }
 }
 
 function onRoomError(err) {

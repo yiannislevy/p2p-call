@@ -3,6 +3,13 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.5.0
+
+- See who is talking: the tile of whoever is speaking gets a thin blue outline, and your own
+  small video does when you speak. Muted people are never outlined.
+- Uses the voice level the browser already measures, averaged between checks so short
+  words count; nothing extra is sent.
+
 ## v1.4.0
 
 - Sharper video: the camera now captures in Full HD (1080p). Ceilings per person you send to:
