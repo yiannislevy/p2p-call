@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src wss://relay.primal.net wss://relay.nostr.net wss://nostr-pub.wellorder.net wss://relay.snort.social wss://relay.ditto.pub wss://nostr.azzamo.net; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Call">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+<title>Call</title>
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+  <symbol id="i-mic-off" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M4 4l16 16"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><rect x="2.5" y="6" width="13.5" height="12" rx="2.5"/><path d="M16 10.2l5.5-3.2v10l-5.5-3.2"/></symbol>
+  <symbol id="i-cam-off" viewBox="0 0 24 24"><rect x="2.5" y="6" width="13.5" height="12" rx="2.5"/><path d="M16 10.2l5.5-3.2v10l-5.5-3.2M3 3l18 18"/></symbol>
+  <symbol id="i-flip" viewBox="0 0 24 24"><path d="M4 9h14l-3.5-3.5M20 15H6l3.5 3.5"/></symbol>
+  <symbol id="i-leave" viewBox="0 0 24 24"><path d="M2.5 14.5c5.5-4.7 13.5-4.7 19 0l-1.8 2.8-4.2-1.2v-2.4a12 12 0 0 0-7 0v2.4l-4.2 1.2z"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3.5V15M7.5 8L12 3.5 16.5 8M5 12.5V20h14v-7.5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 7V4.5h4V7M6.5 7l1 13h9l1-13"/></symbol>
+</svg>
+
+<!-- Rooms -->
+<section id="home" class="screen page">
+  <header class="top">
+    <h1>Call</h1>
+    <button class="text" id="editBtn" type="button" hidden>Edit</button>
+  </header>
+  <p class="lead" id="homeEmpty">Make a room for each group you talk to, like family or friends. Send its invite link once, and everyone can join it any time.</p>
+  <ul id="roomList" class="rooms"></ul>
+  <div class="actions">
+    <button class="btn primary" id="addBtn" type="button">Add a room</button>
+  </div>
+  <p class="foot">Calls go straight between devices and are encrypted end to end. Nothing is stored on any server.<br><button class="text small" id="forgetBtn" type="button">Forget all rooms on this device</button></p>
+</section>
+
+<!-- Add room -->
+<section id="add" class="screen page" hidden>
+  <header class="top">
+    <button class="back" data-back type="button"><svg class="ic"><use href="#i-back"/></svg>Rooms</button>
+  </header>
+  <h2>Add a room</h2>
+  <p class="lead">Create a new room, or enter the name and password someone gave you.</p>
+  <div class="field">
+    <label for="addName">Room name</label>
+    <input id="addName" type="text" maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="family" enterkeyhint="next">
+  </div>
+  <div class="field">
+    <label for="addKey">Password</label>
+    <div class="pw">
+      <input id="addKey" type="text" maxlength="128" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done">
+      <button class="btn" id="genBtn" type="button">New</button>
+    </div>
+  </div>
+  <p class="hint">Everyone in a room uses the same name and password. Keep the generated password: nobody has to type it, you just send them the invite link.</p>
+  <p class="error" id="addErr" role="alert"></p>
+  <div class="actions">
+    <button class="btn primary" id="saveBtn" type="button">Save room</button>
+  </div>
+</section>
+
+<!-- Before joining -->
+<section id="lobby" class="screen page" hidden>
+  <header class="top">
+    <button class="back" data-back type="button"><svg class="ic"><use href="#i-back"/></svg>Rooms</button>
+  </header>
+  <h2 id="lobbyTitle"></h2>
+  <p class="lead" id="lobbyLead"></p>
+  <div class="preview">
+    <video id="preview" class="mirror" autoplay playsinline muted></video>
+    <div class="preview-off" id="previewOff">Camera is off</div>
+    <div class="preview-bar">
+      <button class="round" id="pMic" type="button" aria-label="Turn microphone off"><svg class="ic on"><use href="#i-mic"/></svg><svg class="ic off"><use href="#i-mic-off"/></svg></button>
+      <button class="round" id="pCam" type="button" aria-label="Turn camera off"><svg class="ic on"><use href="#i-cam"/></svg><svg class="ic off"><use href="#i-cam-off"/></svg></button>
+    </div>
+  </div>
+  <p class="error" id="mediaErr" role="alert"></p>
+  <button class="text" id="retryMedia" type="button" hidden>Try the camera again</button>
+  <div class="field">
+    <label for="nameInput">Your name</label>
+    <input id="nameInput" type="text" maxlength="30" autocomplete="nickname" placeholder="How others will see you" enterkeyhint="go">
+  </div>
+  <label class="check" id="saveInviteRow" hidden><input type="checkbox" id="saveInvite" checked> Save this room on this device</label>
+  <p class="error" id="lobbyErr" role="alert"></p>
+  <div class="actions">
+    <button class="btn primary" id="joinBtn" type="button">Join call</button>
+  </div>
+</section>
+
+<!-- In call -->
+<section id="call" class="screen" hidden>
+  <div id="grid" data-n="0"></div>
+  <video id="self" class="mirror" autoplay playsinline muted></video>
+  <div id="alone">
+    <p id="aloneTitle">Connecting…</p>
+    <p id="aloneSub"></p>
+    <button class="btn light" id="aloneInvite" type="button"><svg class="ic"><use href="#i-share"/></svg>Invite people</button>
+  </div>
+  <header id="callTop">
+    <div class="who">
+      <div id="callRoom"></div>
+      <div id="callMeta"></div>
+    </div>
+    <button class="btn ghost" id="topInvite" type="button" aria-label="Invite people"><svg class="ic"><use href="#i-share"/></svg>Invite</button>
+  </header>
+  <button class="btn light" id="tapAudio" type="button" hidden>Tap to turn on sound</button>
+  <nav id="bar">
+    <button class="ctl" id="cMic" type="button"><span class="ring"><svg class="ic on"><use href="#i-mic"/></svg><svg class="ic off"><use href="#i-mic-off"/></svg></span><span class="lb">Mute</span></button>
+    <button class="ctl" id="cCam" type="button"><span class="ring"><svg class="ic on"><use href="#i-cam"/></svg><svg class="ic off"><use href="#i-cam-off"/></svg></span><span class="lb">Camera</span></button>
+    <button class="ctl" id="cFlip" type="button" hidden><span class="ring"><svg class="ic"><use href="#i-flip"/></svg></span><span class="lb">Flip</span></button>
+    <button class="ctl end" id="cLeave" type="button"><span class="ring"><svg class="ic"><use href="#i-leave"/></svg></span><span class="lb">Leave</span></button>
+  </nav>
+</section>
+
+<div id="toasts" aria-live="polite"></div>
+</body>
+</html>
