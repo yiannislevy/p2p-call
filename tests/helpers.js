@@ -57,8 +57,8 @@ export async function joinFromLink(page, link, myName) {
   await expect(page.locator('#call')).toBeVisible({ timeout: 15000 });
 }
 
-export const playingVideos = page => poll(page, () =>
-  [...document.querySelectorAll('#grid .tile video')].filter(v => v.videoWidth > 0).length);
+export const playingVideos = (page, timeout) => poll(page, () =>
+  [...document.querySelectorAll('#grid .tile video')].filter(v => v.videoWidth > 0 && v.closest('.tile').querySelector('.ph').hidden).length, undefined, timeout);
 
 export const tiles = page => page.evaluate(() => [...document.querySelectorAll('#grid .tile')].map(t => ({
   name: t.querySelector('.tag span').textContent,
