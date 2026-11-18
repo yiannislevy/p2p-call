@@ -105,6 +105,10 @@ $('bg').addEventListener('click', () => {
   const timer = setInterval(() => { ticks++; if (bgTest && bgTest.hiddenAt) tickTimes.push(Math.round((Date.now() - bgTest.hiddenAt) / 1000)); }, 1000);
   bgTest = { rec, chunks, timer, tickTimes, ticksAt: () => ticks, hiddenAt: 0, hiddenTicks: 0, videoFrames: 0, recStart: Date.now(), audioIn: null };
   const v = $('remote');
+  // let iOS float the call video by itself when leaving, like FaceTime
+  v.autoPictureInPicture = true;
+  v.setAttribute('autopictureinpicture', '');
+  bgTest.floatingWhenLeft = null;
   if (v.requestVideoFrameCallback) {
     const count = () => { if (document.visibilityState === 'hidden') bgTest.videoFrames++; v.requestVideoFrameCallback(count); };
     v.requestVideoFrameCallback(count);
@@ -117,22 +121,36 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'hidden') {
     bgTest.hiddenAt = Date.now();
     bgTest.hiddenTicks = bgTest.ticksAt();
-    bgTest.audioIn = await audioPackets();
+    bgTest.tappedFloat = !!document.pictureInPictureElement;
+    setTimeout(() => { if (bgTest) bgTest.floatingWhenLeft = !!document.pictureInPictureElement || $('remote').webkitPresentationMode === 'picture-in-picture'; }, 1500);
+    bgTest.audioIn = await withTimeout(audioPackets(), 2000, null);
     return;
   }
   if (!bgTest.hiddenAt) return;
+  const t = bgTest;
+  bgTest = null;
+  try { await finishBackground(t); }
+  catch (e) { results.backgroundError = `${e.name}: ${e.message}`; say('bgResult', 'The test hit an error: ' + e.name, false); }
+  report();
+});
+
+const withTimeout = (p, ms, fallback) => Promise.race([p, new Promise(r => setTimeout(() => r(fallback), ms))]);
+
+async function finishBackground(bgTest) {
   const away = (Date.now() - bgTest.hiddenAt) / 1000;
   const ticksAway = bgTest.ticksAt() - bgTest.hiddenTicks;
-  const audioInAfter = await audioPackets();
+  const audioInAfter = await withTimeout(audioPackets(), 2000, null);
   const callAudioPerSecond = bgTest.audioIn == null || audioInAfter == null ? 'unknown' : Math.round((audioInAfter - bgTest.audioIn) / away);
   clearInterval(bgTest.timer);
   let micSeconds = null;
   if (bgTest.rec) {
-    await new Promise(r => { bgTest.rec.onstop = r; bgTest.rec.stop(); });
+    results.recorderStateOnReturn = bgTest.rec.state;
+    if (bgTest.rec.state !== 'inactive') await withTimeout(new Promise(r => { bgTest.rec.onstop = r; bgTest.rec.stop(); }), 3000);
     try {
       const blob = new Blob(bgTest.chunks, { type: bgTest.rec.mimeType });
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+      const buf = await withTimeout(ctx.decodeAudioData(await blob.arrayBuffer()), 5000, null);
+      if (!buf) throw new Error('could not read the recording');
       micSeconds = buf.duration;
       // which seconds while away were pure digital silence (a paused microphone), not room sound
       const data = buf.getChannelData(0), sr = buf.sampleRate;
@@ -155,6 +173,7 @@ document.addEventListener('visibilitychange', async () => {
     callAudioPacketsPerSecondWhileAway: callAudioPerSecond,
     callVideoFramesWhileAway: bgTest.videoFrames,
     callConnection: rx ? rx.connectionState : 'none',
+    floatedByItself: bgTest.tappedFloat ? 'was already floating' : bgTest.floatingWhenLeft,
     tracksAfterReturn: tracks
   };
   const keptPage = ticksAway >= away * 0.8;
@@ -162,9 +181,7 @@ document.addEventListener('visibilitychange', async () => {
     `Away ${Math.round(away)} s. Page kept running: ${keptPage ? 'yes' : 'no'} (${ticksAway} s). ` +
     `Microphone recorded: ${micSeconds == null ? 'unknown' : Math.round(micSeconds) + ' s'}. ` +
     `Video frames while away: ${bgTest.videoFrames}.`, keptPage);
-  bgTest = null;
-  report();
-});
+}
 
 async function audioPackets() {
   if (!rx) return null;
