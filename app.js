@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -97,7 +97,11 @@ function load() {
     const d = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
     return {
       name: typeof d.name === 'string' ? d.name.slice(0, 30) : '',
-      rooms: Array.isArray(d.rooms) ? d.rooms.filter(validRoom).map(r => ({ name: r.name, key: r.key })) : []
+      rooms: Array.isArray(d.rooms) ? d.rooms.filter(validRoom).map(r => {
+        const room = { name: r.name, key: r.key };
+        if (typeof r.label === 'string' && clean(r.label)) room.label = clean(r.label).slice(0, 40);
+        return room;
+      }) : []
     };
   } catch { return { name: '', rooms: [] }; }
 }
@@ -105,8 +109,43 @@ function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
 let data = load();
 
 function addRoom(r) {
-  if (!data.rooms.some(x => sameRoom(x, r))) data.rooms.push({ name: r.name, key: r.key });
+  if (!data.rooms.some(x => sameRoom(x, r))) {
+    const room = { name: r.name, key: r.key };
+    if (r.label && r.label !== r.name) room.label = r.label;
+    data.rooms.push(room);
+  }
   save();
+}
+
+// What this device calls a room: your own name for it if you gave one, else its real name.
+const shownName = r => r.label || r.name;
+
+// Rooms found in pasted text: invite links, one or many, in any surrounding text. A line like
+// "Weekend crew: https://…#room=family&key=…" (as "Copy all rooms" makes) keeps "Weekend crew"
+// as this device's own name for the room.
+function roomsFromText(text) {
+  const found = [];
+  for (const line of String(text || '').split(/\n/)) {
+    const re = /#room=([^&\s#]+)&key=([^\s&#]+)/g;
+    let m, first = true;
+    while ((m = re.exec(line))) {
+      try {
+        const r = { name: clean(decodeURIComponent(m[1])).slice(0, 40), key: decodeURIComponent(m[2]).trim() };
+        if (!validRoom(r) || found.some(x => sameRoom(x, r))) continue;
+        // Only the exact "name: link" lines that Copy all rooms makes carry a name of their own,
+        // so a pasted message like "join us here https://…" doesn't become a room's name.
+        const own = first && line.match(/^\s*([^:]{1,40}):\s+https?:\/\/\S+\s*$/);
+        if (own && clean(own[1]).toLowerCase() !== r.name.toLowerCase()) r.label = clean(own[1]);
+        first = false;
+        found.push(r);
+      } catch {}
+    }
+  }
+  return found;
+}
+
+function exportText() {
+  return data.rooms.map(r => `${shownName(r)}: ${inviteLink(r)}`).join('\n');
 }
 
 function inviteLink(r) {
@@ -191,44 +230,100 @@ function renderHome() {
   $('homeEmpty').hidden = data.rooms.length > 0;
   $('editBtn').hidden = data.rooms.length === 0;
   $('editBtn').textContent = editing ? 'Done' : 'Edit';
+  $('moveBox').hidden = !editing;
+  $('addBtn').parentElement.hidden = editing;
   rowRefs.clear();
-  for (const r of data.rooms) {
+  data.rooms.forEach((r, i) => {
     const li = el('li', 'room');
+    if (editing) { li.append(...editRow(r, i)); $('roomList').append(li); return; }
     const main = el('button', 'main');
     main.type = 'button';
-    const sub = el('div', 'sub', editing ? '' : 'Tap to join');
-    main.append(el('div', 'name', r.name), sub);
+    const sub = el('div', 'sub', 'Tap to join');
+    main.append(el('div', 'name', shownName(r)), sub);
     const faces = el('span', 'faces');
     faces.hidden = true;
     if (!editing) rowRefs.set(roomKeyOf(r), { sub, faces, li });
-    main.addEventListener('click', () => { if (!editing) openLobby(r, false); });
-    if (editing) {
-      const del = el('button', 'icon-btn del');
-      del.type = 'button';
-      del.setAttribute('aria-label', 'Remove ' + r.name);
-      del.append(icon('trash'));
-      del.addEventListener('click', () => {
-        if (!confirm(`Remove "${r.name}" from this device?\nYou can add it again later with its invite link.`)) return;
-        data.rooms = data.rooms.filter(x => !sameRoom(x, r));
-        save(); renderHome();
-      });
-      li.append(main, del);
-    } else {
-      const inv = el('button', 'icon-btn');
-      inv.type = 'button';
-      inv.setAttribute('aria-label', 'Invite people to ' + r.name);
-      inv.append(icon('share'));
-      inv.addEventListener('click', () => invite(r));
-      li.append(main, faces, inv);
-    }
+    main.addEventListener('click', () => openLobby(r, false));
+    const inv = el('button', 'icon-btn');
+    inv.type = 'button';
+    inv.setAttribute('aria-label', 'Invite people to ' + shownName(r));
+    inv.append(icon('share'));
+    inv.addEventListener('click', () => invite(r));
+    li.append(main, faces, inv);
     list.append(li);
-  }
+  });
   for (const [rk, names] of presenceNow) showPresence(rk, names);
   syncWatching();
 }
 
+// Editing: give a room your own name (only on this device; others keep its real name),
+// move it up or down, or remove it.
+function editRow(r, i) {
+  const col = el('div', 'edit-col');
+  const input = el('input', 'label');
+  input.type = 'text';
+  input.maxLength = 40;
+  input.value = shownName(r);
+  input.setAttribute('aria-label', 'Your name for ' + r.name);
+  input.enterKeyHint = 'done';
+  const real = el('span', 'real', r.label ? 'Room: ' + r.name : '');
+  input.addEventListener('change', () => {
+    const v = clean(input.value).slice(0, 40);
+    if (!v || v.toLowerCase() === r.name.toLowerCase()) delete r.label; else r.label = v;
+    input.value = shownName(r);
+    real.textContent = r.label ? 'Room: ' + r.name : '';
+    for (const b of buttons) b.setAttribute('aria-label', b.__what + ' ' + shownName(r));
+    save();
+  });
+  const buttons = [];
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+  col.append(input, real);
+  const move = (dir, name) => {
+    const b = el('button', 'icon-btn small');
+    b.type = 'button';
+    b.__what = dir < 0 ? 'Move up' : 'Move down';
+    b.setAttribute('aria-label', b.__what + ' ' + shownName(r));
+    buttons.push(b);
+    b.append(icon(name));
+    b.disabled = dir < 0 ? i === 0 : i === data.rooms.length - 1;
+    b.addEventListener('click', () => {
+      const j = i + dir;
+      [data.rooms[i], data.rooms[j]] = [data.rooms[j], data.rooms[i]];
+      save(); renderHome();
+    });
+    return b;
+  };
+  const del = el('button', 'icon-btn del');
+  del.type = 'button';
+  del.__what = 'Remove';
+  del.setAttribute('aria-label', 'Remove ' + shownName(r));
+  buttons.push(del);
+  del.append(icon('trash'));
+  del.addEventListener('click', () => {
+    if (!confirm(`Remove "${shownName(r)}" from this device?\nYou can add it again later with its invite link.`)) return;
+    data.rooms = data.rooms.filter(x => !sameRoom(x, r));
+    save(); renderHome();
+  });
+  return [col, move(-1, 'up'), move(1, 'down'), del];
+}
+
 $('editBtn').addEventListener('click', () => { editing = !editing; renderHome(); });
-$('addBtn').addEventListener('click', openAdd);
+$('copyAllBtn').addEventListener('click', async () => {
+  const text = exportText();
+  const n = data.rooms.length;
+  if (await copyText(text)) { toast(`Copied ${n} room${n === 1 ? '' : 's'}. In the other browser or app: Paste invite links.`, 4500); return; }
+  // Copying was refused: show them to copy by hand.
+  sheetRoom = null;
+  $('sheetTitle').textContent = 'Copy your rooms';
+  $('sheetSub').textContent = 'Select all of it and copy it, then paste it in the other browser or app with Paste invite links.';
+  $('sheetLink').value = text.replace(/\n/g, '  ');
+  $('sheetShare').hidden = true;
+  $('sheetBack').hidden = false;
+  $('sheet').hidden = false;
+  $('sheetLink').focus(); $('sheetLink').select();
+});
+$('pasteLinksBtn').addEventListener('click', () => { openAdd(true); $('importText').focus(); });
+$('addBtn').addEventListener('click', () => openAdd(false));
 $('forgetBtn').addEventListener('click', () => {
   if (!confirm('Remove all rooms and your name from this device?')) return;
   try { localStorage.removeItem(STORE_KEY); } catch {}
@@ -239,12 +334,44 @@ $('forgetBtn').addEventListener('click', () => {
 
 /* ---------------------------------------------------------------- add room */
 
-function openAdd() {
+function openAdd(pasting) {
+  $('add').classList.toggle('pasting', !!pasting);
+  $('createPart').hidden = !!pasting;
+  $('addTitle').textContent = pasting ? 'Paste invite links' : 'Add a room';
   $('addName').value = '';
   $('addKey').value = newPassword();
   $('addErr').textContent = '';
+  $('importText').value = '';
+  $('importErr').textContent = '';
+  $('pasteBtn').hidden = !(navigator.clipboard && navigator.clipboard.readText);
   push('add');
 }
+
+function importRooms() {
+  const found = roomsFromText($('importText').value);
+  if (!found.length) {
+    $('importErr').textContent = $('importText').value.trim()
+      ? 'No invite links found. They look like …#room=family&key=…'
+      : 'Paste one or more invite links first.';
+    return;
+  }
+  const fresh = found.filter(r => !data.rooms.some(x => sameRoom(x, r)));
+  for (const r of fresh) addRoom(r);
+  const had = found.length - fresh.length;
+  pendingToast = fresh.length
+    ? `Added ${fresh.length} room${fresh.length === 1 ? '' : 's'}` + (had ? ` (${had} you already had)` : '')
+    : (had === 1 ? 'You already had this room' : 'You already had these rooms');
+  back();
+}
+$('importBtn').addEventListener('click', importRooms);
+$('pasteBtn').addEventListener('click', async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) { $('importText').value = text; importRooms(); return; }
+  } catch {}
+  $('importErr').textContent = 'Could not read the clipboard. Press and hold in the box above, then Paste.';
+  $('importText').focus();
+});
 $('genBtn').addEventListener('click', () => { $('addKey').value = newPassword(); });
 $('addName').addEventListener('keydown', e => { if (e.key === 'Enter') $('addKey').focus(); });
 $('addKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('saveBtn').click(); });
@@ -456,7 +583,8 @@ function recallActive() {
 // resume: a call we were in before a refresh; rejoin it straight away.
 function openLobby(r, invited, resume) {
   lobbyRoom = { name: r.name, key: r.key, invited };
-  $('lobbyTitle').textContent = r.name;
+  const saved = data.rooms.find(x => sameRoom(x, r));
+  $('lobbyTitle').textContent = saved ? shownName(saved) : r.name;
   $('lobbyWho').hidden = true;
   $('lobbyLead').textContent = invited
     ? 'You have been invited to this room. Check your camera and sound, then join.'
@@ -543,7 +671,8 @@ async function startCall(r, resumeSession) {
   history.replaceState({ s: 'call' }, '');
   show('call');
   rememberActive('call');
-  $('callRoom').textContent = r.name;
+  const saved = data.rooms.find(x => sameRoom(x, r));
+  $('callRoom').textContent = saved ? shownName(saved) : r.name;
   t0 = Date.now();
   timer = setInterval(updateMeta, 1000);
   healthTimer = setInterval(checkHealth, 2000);

@@ -3,6 +3,17 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.9.0
+
+Rooms screen:
+
+- **Paste invite links** adds rooms from one or more pasted links, or from a whole message
+  someone sent. Paste reads the clipboard in one tap.
+- **Copy all rooms** (under Edit) copies every room as an invite link, to paste in another
+  browser or the home screen app, which keep their rooms separately.
+- Under Edit you can give a room your own name (only on this device; the room and its
+  invite link stay the same for everyone), and move rooms up or down.
+
 ## v1.8.0
 
 Calls that connect more often, and clearer voice on bad connections. Still no server:

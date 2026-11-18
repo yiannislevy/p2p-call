@@ -33,6 +33,8 @@
   <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3.5V15M7.5 8L12 3.5 16.5 8M5 12.5V20h14v-7.5"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 14.5l6-6 6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 7V4.5h4V7M6.5 7l1 13h9l1-13"/></symbol>
 </svg>
 
@@ -46,6 +48,11 @@
   <ul id="roomList" class="rooms"></ul>
   <div class="actions">
     <button class="btn primary" id="addBtn" type="button">Add a room</button>
+    <button class="btn" id="pasteLinksBtn" type="button">Paste invite links</button>
+  </div>
+  <div class="move" id="moveBox" hidden>
+    <p class="hint">Rooms are kept per browser: the home screen app and Safari don't share them. To move them, copy them all here and paste them there with <strong>Paste invite links</strong>.</p>
+    <button class="btn" id="copyAllBtn" type="button">Copy all rooms</button>
   </div>
   <p class="foot">Calls go straight between devices and are encrypted end to end. Nothing is stored on any server.<br><button class="text small" id="forgetBtn" type="button">Forget all rooms on this device</button><br><span class="ver" id="ver"></span></p>
 </section>
@@ -55,7 +62,8 @@
   <header class="top">
     <button class="back" data-back type="button"><svg class="ic"><use href="#i-back"/></svg>Rooms</button>
   </header>
-  <h2>Add a room</h2>
+  <h2 id="addTitle">Add a room</h2>
+  <div id="createPart">
   <p class="lead">Create a new room, or enter the name and password someone gave you.</p>
   <div class="field">
     <label for="addName">Room name</label>
@@ -72,6 +80,17 @@
   <p class="error" id="addErr" role="alert"></p>
   <div class="actions">
     <button class="btn primary" id="saveBtn" type="button">Save room</button>
+  </div>
+  </div>
+  <div class="field" id="importField">
+    <h3>Have invite links?</h3>
+    <label for="importText">Paste one or more invite links, or rooms copied from another browser.</label>
+    <textarea id="importText" rows="3" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="https://…#room=…&amp;key=…"></textarea>
+  </div>
+  <p class="error" id="importErr" role="alert"></p>
+  <div class="actions two">
+    <button class="btn" id="pasteBtn" type="button">Paste</button>
+    <button class="btn primary" id="importBtn" type="button">Add from links</button>
   </div>
 </section>
 
