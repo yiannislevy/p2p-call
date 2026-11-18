@@ -64,7 +64,9 @@ page; it never sees a call.
 - Names and room names are always shown as plain text.
 - "Who is in" notes are encrypted with the room password and signed with a throwaway key
   per session, so they cannot be read or linked to a person by the relays.
-- Rooms and your name are stored only on your device; "Forget all rooms" removes them.
+- Rooms and your name are stored only on your device; "Forget all rooms" removes them. Each
+  browser keeps its own rooms (Safari and the home screen app too): Edit, Copy all rooms, then
+  Paste invite links in the other one moves them.
 - Kept out of search engines.
 
 What to know:

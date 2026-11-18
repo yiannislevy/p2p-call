@@ -53,7 +53,25 @@ h2 { font-size: 28px; font-weight: 650; letter-spacing: -.02em; margin-top: 6px;
   width: 100%; height: 52px; border: 1px solid var(--line); background: var(--field);
   border-radius: 14px; padding: 0 14px; font-size: 17px; outline: none; -webkit-appearance: none; appearance: none;
 }
-.field input:focus { border-color: var(--mute); }
+.field input:focus, .field textarea:focus { border-color: var(--mute); }
+.field textarea {
+  width: 100%; border: 1px solid var(--line); background: var(--field); border-radius: 14px; padding: 12px 14px;
+  font: 15px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; outline: none; resize: vertical; -webkit-appearance: none; appearance: none;
+}
+.field h3 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+#importField { margin-top: 38px; padding-top: 22px; border-top: 1px solid var(--line); }
+#add.pasting #importField { margin-top: 14px; padding-top: 0; border-top: 0; }
+#add.pasting #importField h3 { display: none; }
+.actions.two { flex-direction: row; }
+.actions.two .btn { flex: 1; width: auto; }
+.move { margin-top: 18px; }
+.move .btn { width: 100%; margin-top: 10px; }
+.room .label { width: 100%; min-width: 0; height: 46px; flex: none; margin: 10px 0; border: 1px solid var(--line); background: var(--field); border-radius: 12px; padding: 0 12px; font-size: 17px; font-weight: 600; outline: none; }
+.room .label:focus { border-color: var(--mute); }
+.room .real { display: block; font-size: 12px; color: var(--mute); margin: -6px 0 8px; }
+.room .edit-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.icon-btn.small { width: 38px; }
+.icon-btn:disabled { opacity: .25; }
 .pw { display: flex; gap: 8px; }
 .pw input { flex: 1; min-width: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 16px; }
 .pw .btn { min-height: 52px; padding: 0 18px; }
