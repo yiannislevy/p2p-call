@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -266,6 +266,31 @@ let facing = 'user';
 let micOn = true, camOn = true;
 
 const AUDIO = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+
+// Voice that survives lost packets: each bit of sound also rides along in the next packet
+// (audio redundancy, RED), where both phones support it. Otherwise plain Opus, as before.
+const VOICE_CODECS = (() => {
+  try {
+    const all = RTCRtpReceiver.getCapabilities('audio').codecs;
+    const red = all.filter(c => /^audio\/red$/i.test(c.mimeType));
+    const opus = all.filter(c => /^audio\/opus$/i.test(c.mimeType));
+    if (!red.length || !opus.length) return null;
+    return [...red, ...opus, ...all.filter(c => !red.includes(c) && !opus.includes(c))];
+  } catch { return null; }
+})();
+if (VOICE_CODECS && window.RTCPeerConnection && RTCRtpTransceiver.prototype.setCodecPreferences) {
+  const addTrack = RTCPeerConnection.prototype.addTrack;
+  RTCPeerConnection.prototype.addTrack = function (track, ...streams) {
+    const sender = addTrack.call(this, track, ...streams);
+    try {
+      if (sender && track && track.kind === 'audio') {
+        const t = this.getTransceivers().find(x => x.sender === sender);
+        if (t) t.setCodecPreferences(VOICE_CODECS);
+      }
+    } catch {}
+    return sender;
+  };
+}
 const videoConstraints = f => ({ facingMode: f, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } });
 
 async function startMedia() {
@@ -492,12 +517,13 @@ let room = null, stateAction = null, callRoom = null, callId = '', inCall = fals
 let t0 = 0, timer = 0, wakeLock = null, relayTimer = 0, healthTimer = 0, speakTimer = 0;
 let mySession = '', selfReconnecting = false, rejoining = false, downSince = 0, rejoinAt = 0, rejoins = 0;
 let pendingLeave = Promise.resolve();
-let resendAction = null;
+let resendAction = null, relayAction = null, relayStateAction = null;
 let aliveInCall = new Set();     // call sessions the room's presence notes say are still here
 let roomMembers = [];            // [{ name, cs }] from those notes
 const unseen = new Map();        // call session -> { name, since, tries, told }: in the room, not connected to us
 const UNSEEN_MS = 15000;         // in the room but not connected this long: try to pick them up
-const MAX_TRIES = 2;             // rejoins per such person, so a network that can't connect never makes us flap
+const MAX_TRIES = 2;
+const TEST_HOOKS = 0;            // test builds only: lets tests block a direct connection between two people             // rejoins per such person, so a network that can't connect never makes us flap
 const people = new Map();        // session id (or 'peer:<id>' for older versions) -> person
 const byPeer = new Map();        // connection (peer id) -> person
 
@@ -544,9 +570,19 @@ function joinCallRoom() {
   resendAction = me.makeAction('rs');
   resendAction.onReceive(ctx => ctx.byteLength <= 64);
   resendAction.onMessage((msg, { peerId }) => { if (live()) resendTo(peerId); });
+  relayAction = me.makeAction('rl');
+  relayAction.onReceive(ctx => ctx.byteLength <= 128);
+  relayAction.onMessage((msg, { peerId }) => { if (live()) onRelayAsk(peerId, msg); });
+  relayStateAction = me.makeAction('rx');
+  relayStateAction.onReceive(ctx => ctx.byteLength <= 512);
+  relayStateAction.onMessage((msg, { peerId }) => { if (live()) onRelayState(peerId, msg); });
   me.onPeerJoin(({ peerId }) => { if (live()) onPeerJoin(peerId); });
   me.onPeerLeave(({ peerId }) => { if (live()) onPeerLeave(peerId); });
-  me.onPeerStream((stream, { peerId }) => { if (live()) onPeerStream(peerId, stream); });
+  me.onPeerStream((stream, { peerId, metadata }) => {
+    if (!live()) return;
+    if (metadata && typeof metadata === 'object' && typeof metadata.via === 'string') onRelayedStream(peerId, metadata.via, stream);
+    else onPeerStream(peerId, stream);
+  });
   me.onError(err => { if (live()) onRoomError(err); });
 }
 
@@ -571,6 +607,8 @@ function leaveCall() {
   roomMembers = [];
   unseen.clear();
   byPeer.clear();
+  relaysOut.clear();
+  relayAsk.clear();
   clearInterval(timer); clearInterval(relayTimer); clearInterval(healthTimer); clearInterval(speakTimer);
   $('self').classList.remove('speaking');
   try { wakeLock && wakeLock.release(); } catch {}
@@ -603,10 +641,12 @@ document.addEventListener('visibilitychange', async () => {
 function sendState(target) {
   if (!stateAction) return;
   const msg = {
-    n: data.name, m: micOn, c: camOn, nt: netType || undefined, s: mySession,
+    n: data.name, m: micOn, c: camOn, nt: netType || undefined, v6: netV6 || undefined, s: mySession,
     hv: !!(local && local.getVideoTracks()[0]),   // we have a camera to send
     ha: !!(local && local.getAudioTracks()[0]),   // we have a microphone to send
-    bg: document.visibilityState === 'hidden'     // in another app (iPhone pauses the camera then)
+    bg: document.visibilityState === 'hidden',    // in another app (iPhone pauses the camera then)
+    l: linkedSessions(),                          // who we have a direct connection with
+    r: 1                                          // we can pass someone's video along to others
   };
   stateAction.send(msg, target ? { target } : undefined).catch(() => {});
 }
@@ -623,6 +663,8 @@ function newPerson(key) {
 
 function removePerson(p, quietly) {
   clearTimeout(p.grace); clearTimeout(p.repair);
+  if (p.sess) endRelaysOf(p.sess);
+  if (p.relayVia) stopRelay(p);
   if (p.peerId) byPeer.delete(p.peerId);
   p.ui.video.srcObject = null;
   p.ui.root.remove();
@@ -657,6 +699,7 @@ function markReconnecting(p) {
 }
 
 function setStream(p, stream) {
+  if (p.stream && p.stream !== stream && p.sess) refreshRelaysOf(p.sess, stream);
   p.stream = stream;
   const v = p.ui.video;
   if (v.srcObject !== stream) v.srcObject = stream;
@@ -672,6 +715,7 @@ function setStream(p, stream) {
 
 function onPeerJoin(peerId) {
   if (!inCall || byPeer.has(peerId)) return;
+  if (TEST_HOOKS && blockedPeers.has(peerId)) { closePeer(peerId); return; }
   const p = newPerson('peer:' + peerId);
   p.peerId = peerId;
   p.linkedAt = Date.now();
@@ -684,8 +728,10 @@ function onPeerJoin(peerId) {
 }
 
 function onPeerLeave(peerId) {
+  relayerGone(peerId);
   const p = byPeer.get(peerId);
   byPeer.delete(peerId);
+  if (p && p.sess) endRelaysOf(p.sess);
   if (!p || p.peerId !== peerId) return;   // already back on a newer connection
   p.peerId = null;
   if (p.leaving || !p.sess) removePerson(p, false);   // said goodbye, or an older version
@@ -700,6 +746,7 @@ function onPeerStream(peerId, stream) {
 
 function onPeerState(peerId, msg) {
   if (!msg || typeof msg !== 'object' || typeof msg.n !== 'string') return;
+  if (TEST_HOOKS && window.__block && msg.n === window.__block) { blockPeer(peerId); return; }
   if (!byPeer.has(peerId)) onPeerJoin(peerId);
   let p = byPeer.get(peerId);
   if (!p) return;
@@ -709,6 +756,7 @@ function onPeerState(peerId, msg) {
     if (known && known !== p) {
       // The same person on a new connection: keep their tile, drop the temporary one.
       if (known.peerId && known.peerId !== peerId) byPeer.delete(known.peerId);
+      if (known.relayVia) stopRelay(known);   // a direct connection now: no need to pass it along
       known.peerId = peerId;
       known.linkedAt = Date.now();
       known.rx = null; known.starvedSince = 0; known.asks = 0;
@@ -726,6 +774,17 @@ function onPeerState(peerId, msg) {
     p.sess = sess;
   }
   if (p.reconnecting) { p.reconnecting = false; clearTimeout(p.grace); clearTimeout(p.repair); }
+  applyState(p, msg);
+  if (Array.isArray(msg.l)) p.links = new Set(msg.l.filter(x => typeof x === 'string' && /^[0-9a-f]{8,32}$/.test(x)).slice(0, MAX_PEOPLE));
+  p.canRelay = msg.r === 1;
+  forwardState(p);
+  if (!p.announced && !p.leaving) { p.announced = true; toast(p.name + ' joined'); }
+  renderTile(p);
+  layout();
+}
+
+// Name, microphone, camera and so on, from a state message (direct, or passed along).
+function applyState(p, msg) {
   p.name = clean(msg.n).slice(0, 30) || 'Someone';
   p.mic = msg.m !== false;
   p.cam = msg.c !== false;
@@ -735,9 +794,7 @@ function onPeerState(peerId, msg) {
   p.hasVideo = msg.hv !== false;
   p.hasAudio = msg.ha !== false;
   p.bg = msg.bg === true;
-  if (!p.announced && !p.leaving) { p.announced = true; toast(p.name + ' joined'); }
-  renderTile(p);
-  layout();
+  p.v6 = msg.v6 === true;
 }
 
 // Media watchdog: a connection can be up while someone's video or sound never arrives (or
@@ -851,6 +908,7 @@ function checkHealth() {
   checkOffered();
   recoverLocalTracks(false);
   checkUnseen();
+  checkRelays();
   renderDetails();   // keeps the connection details current while they are open
   const states = linkStates();
   const anyUp = states.some(s => s === 'connected');
@@ -876,9 +934,11 @@ async function rejoin(repairing) {
   updateMeta();
   const old = room;
   room = null; stateAction = null;
+  relaysOut.clear();
   for (const p of [...people.values()]) {
     if (p.peerId) byPeer.delete(p.peerId);
     p.peerId = null;
+    p.relayVia = null;
     if (p.sess) markReconnecting(p); else removePerson(p, true);   // older versions rejoin as new tiles
   }
   byPeer.clear();
@@ -910,14 +970,28 @@ async function watchSpeaking() {
     try { all = room.getPeers(); } catch {}
     const now = Date.now();
     let selfPc = null;
-    for (const p of people.values()) {
-      const pc = p.peerId && all[p.peerId] && all[p.peerId].connection;
+    // Every incoming voice, by track (a connection can carry someone passed along, too).
+    const byTrack = new Map(), byLink = new Map();
+    for (const [id, info] of Object.entries(all)) {
+      const pc = info && info.connection;
       if (!pc || pc.connectionState !== 'connected') continue;
       selfPc = selfPc || pc;
-      let e = 0, d = 0, found = false;
+      const sum = { e: 0, d: 0 };
       (await pc.getStats()).forEach(s => {
-        if (s.type === 'inbound-rtp' && s.kind === 'audio' && s.totalSamplesDuration != null) { e += s.totalAudioEnergy || 0; d += s.totalSamplesDuration; found = true; }
+        if (s.type !== 'inbound-rtp' || s.kind !== 'audio' || s.totalSamplesDuration == null) return;
+        const v = { e: s.totalAudioEnergy || 0, d: s.totalSamplesDuration };
+        if (s.trackIdentifier) byTrack.set(s.trackIdentifier, v);
+        sum.e += v.e; sum.d += v.d;
       });
+      byLink.set(id, sum);
+    }
+    for (const p of people.values()) {
+      let e = 0, d = 0, found = false;
+      for (const t of p.stream ? p.stream.getAudioTracks() : []) {
+        const v = byTrack.get(t.id);
+        if (v) { e += v.e; d += v.d; found = true; }
+      }
+      if (!found && p.peerId && byLink.has(p.peerId) && !relayedThrough(p.peerId)) { const v = byLink.get(p.peerId); e = v.e; d = v.d; found = v.d > 0; }
       if (!found) continue;
       const level = levelSince(p.energy, e, d);
       p.energy = { e, d };
@@ -979,6 +1053,175 @@ function checkUnseen() {
       return;
     }
   }
+}
+
+/* Passing video along. When two people in a call can't connect directly (both on networks
+   that block it) but both are connected to a third person, that person's phone passes each
+   one's video and sound to the other. Nobody sees anything they wouldn't see in the call
+   anyway, and there is still no server: it's one of the people in the call. */
+
+const RELAY_AFTER_MS = 15000;    // in the room but not connected this long: ask someone to pass them along
+const RELAY_WAIT_MS = 12000;     // asked, but nothing came this long: ask someone else
+const MAX_RELAYS_OUT = 2;        // pass along at most this many video streams (it costs the phone)
+const relaysOut = new Map();     // `${peerId}|${session}` -> { peerId, sess, stream }: we pass sess along to peerId
+const relayAsk = new Map();      // session -> { since, via, at, tried }: someone we'd like passed along to us
+
+const relayedThrough = peerId => [...people.values()].some(p => p.relayVia === peerId);
+
+function linkedSessions() {
+  return [...people.values()].filter(p => p.peerId && p.sess && !p.reconnecting).map(p => p.sess);
+}
+
+// We were asked to pass someone along (or to stop).
+function onRelayAsk(peerId, msg) {
+  if (!msg || typeof msg !== 'object' || typeof msg.s !== 'string') return;
+  const key = peerId + '|' + msg.s;
+  if (msg.on !== true) { endRelayOut(key, false); return; }
+  const them = people.get(msg.s), asker = byPeer.get(peerId);
+  if (!them || !them.peerId || !them.stream || !asker || them === asker || !room) return;
+  if (relaysOut.has(key) || relaysOut.size >= MAX_RELAYS_OUT) return;
+  relaysOut.set(key, { peerId, sess: msg.s, stream: them.stream });
+  room.addStream(them.stream, { target: peerId, metadata: { via: msg.s } }).catch(() => {});
+  relayStateAction.send(relayedState(them), { target: peerId }).catch(() => {});
+  setTimeout(tuneBitrate, 1500);
+}
+
+function relayedState(p) {
+  return { s: p.sess, n: p.name, m: p.mic, c: p.cam, hv: p.hasVideo !== false, ha: p.hasAudio !== false, bg: !!p.bg };
+}
+function forwardState(p) {
+  if (!p.sess || !relayStateAction) return;
+  for (const r of relaysOut.values()) if (r.sess === p.sess) relayStateAction.send(relayedState(p), { target: r.peerId }).catch(() => {});
+}
+function endRelayOut(key, tell) {
+  const r = relaysOut.get(key);
+  if (!r) return;
+  relaysOut.delete(key);
+  try { room && room.removeStream(r.stream, { target: r.peerId }); } catch {}
+  if (tell && relayStateAction) relayStateAction.send({ s: r.sess, gone: true }, { target: r.peerId }).catch(() => {});
+}
+function endRelaysOf(sess) {
+  for (const [key, r] of [...relaysOut]) if (r.sess === sess) endRelayOut(key, true);
+}
+function refreshRelaysOf(sess, stream) {
+  for (const r of relaysOut.values()) {
+    if (r.sess !== sess || r.stream === stream) continue;
+    try { room.removeStream(r.stream, { target: r.peerId }); } catch {}
+    r.stream = stream;
+    room.addStream(stream, { target: r.peerId, metadata: { via: sess } }).catch(() => {});
+  }
+}
+
+// Someone is in the room but we have no connection to them: ask a person connected to both
+// of us to pass them along. One at a time, a few seconds each, then the next.
+function checkRelays() {
+  if (!inCall || rejoining || !relayAction) return;
+  const now = Date.now();
+  for (const m of roomMembers) {
+    if (!m.cs || m.cs === mySession) continue;
+    const p = people.get(m.cs);
+    if (p && p.peerId) { if (relayAsk.has(m.cs)) relayAsk.delete(m.cs); continue; }
+    let ask = relayAsk.get(m.cs);
+    if (!ask) { ask = { since: now, via: null, at: 0, tried: new Set() }; relayAsk.set(m.cs, ask); }
+    if (p && p.relayVia) {
+      // Passed along, but nothing comes any more (the helper stopped, or lost them): ask again.
+      const alive = p.stream && p.stream.getTracks().some(t => t.readyState === 'live' && !t.muted);
+      if (alive) { p.relayDeadSince = 0; continue; }
+      p.relayDeadSince = p.relayDeadSince || now;
+      if (now - p.relayDeadSince < 4000) continue;
+      p.relayDeadSince = 0;
+      const via = p.relayVia;
+      relayEnded(p);
+      relayAction.send({ s: m.cs, on: false }, { target: via }).catch(() => {});
+      continue;
+    }
+    if (ask.via) {
+      if (now - ask.at < RELAY_WAIT_MS) continue;
+      ask.tried.add(ask.via);
+      relayAction.send({ s: m.cs, on: false }, { target: ask.via }).catch(() => {});
+      ask.via = null;
+    }
+    if (now - ask.since < RELAY_AFTER_MS || now < (ask.next || 0)) continue;
+    const helpers = [...people.values()].filter(h => h.peerId && !h.reconnecting && h.canRelay && h.links && h.links.has(m.cs));
+    let helper = helpers.find(h => !ask.tried.has(h.peerId));
+    // Everyone was tried: start over after a pause (their own connections may have settled).
+    if (!helper && helpers.length && now - ask.at >= RELAY_WAIT_MS) { ask.tried.clear(); helper = helpers[0]; }
+    if (!helper) continue;
+    ask.via = helper.peerId;
+    ask.at = now;
+    relayAction.send({ s: m.cs, on: true }, { target: helper.peerId }).catch(() => {});
+  }
+  for (const cs of [...relayAsk.keys()]) if (!roomMembers.some(m => m.cs === cs)) relayAsk.delete(cs);
+}
+
+function onRelayedStream(peerId, sess, stream) {
+  const ask = relayAsk.get(sess);
+  if (!ask || ask.via !== peerId || !/^[0-9a-f]{8,32}$/.test(sess)) return;   // only what we asked for
+  let p = people.get(sess);
+  if (p && p.peerId) return;            // connected directly in the meantime
+  if (!p) {
+    p = newPerson(sess);
+    p.sess = sess;
+    const m = roomMembers.find(x => x.cs === sess);
+    p.name = m ? clean(m.name).slice(0, 30) : 'Someone';
+  }
+  p.relayVia = peerId;
+  if (p.reconnecting) { p.reconnecting = false; clearTimeout(p.grace); clearTimeout(p.repair); }
+  setStream(p, stream);
+  const helper = byPeer.get(peerId);
+  if (!p.relayTold) {
+    p.relayTold = true;
+    toast(`${p.name} can't connect to you directly, so ${helper && helper.name ? helper.name + '\'s' : 'another'} phone passes them along`, 6000);
+  }
+  p.announced = true;
+  renderTile(p);
+  layout();
+}
+
+function onRelayState(peerId, msg) {
+  if (!msg || typeof msg !== 'object' || typeof msg.s !== 'string') return;
+  const p = people.get(msg.s);
+  if (!p || p.relayVia !== peerId || p.peerId) return;
+  if (msg.gone) { relayEnded(p); return; }
+  if (typeof msg.n !== 'string') return;
+  applyState(p, msg);
+  renderTile(p);
+}
+
+function stopRelay(p) {
+  const via = p.relayVia;
+  p.relayVia = null;
+  relayAsk.delete(p.sess);
+  if (via && relayAction) relayAction.send({ s: p.sess, on: false }, { target: via }).catch(() => {});
+}
+function relayEnded(p) {
+  const ask = relayAsk.get(p.sess);
+  if (ask) { ask.via = null; ask.next = Date.now() + 2000; }   // ask again shortly (them or someone else)
+  p.relayVia = null;
+  if (!p.peerId) { if (p.sess) markReconnecting(p); else removePerson(p, true); }
+}
+// The person passing others along to us left or dropped.
+function relayerGone(peerId) {
+  for (const p of [...people.values()]) if (p.relayVia === peerId) relayEnded(p);
+  for (const [key, r] of [...relaysOut]) if (r.peerId === peerId) endRelayOut(key, false);
+}
+
+// Test builds only: refuse a direct connection with someone, as two blocking networks would.
+const blockedPeers = new Set();
+if (TEST_HOOKS) window.__debugRelay = () => JSON.stringify({
+  people: [...people.values()].map(p => ({ n: p.name, s: p.sess.slice(0, 6), peer: !!p.peerId, via: !!p.relayVia, rec: p.reconnecting, links: p.links ? [...p.links].map(x => x.slice(0, 6)) : null, canRelay: p.canRelay })),
+  members: roomMembers.map(m => m.name + ':' + (m.cs || '').slice(0, 6)),
+  ask: [...relayAsk].map(([k, v]) => ({ s: k.slice(0, 6), via: !!v.via, tried: v.tried.size, age: Date.now() - v.since })),
+  out: [...relaysOut.values()].map(r => r.sess.slice(0, 6)), me: mySession.slice(0, 6), blocked: blockedPeers.size
+});
+function closePeer(peerId) {
+  try { const info = room && room.getPeers()[peerId]; info && info.connection && info.connection.close(); } catch {}
+}
+function blockPeer(peerId) {
+  blockedPeers.add(peerId);
+  const p = byPeer.get(peerId);
+  if (p) { p.peerId = null; byPeer.delete(peerId); removePerson(p, true); }
+  closePeer(peerId);
 }
 
 function onRoomError(err) {
@@ -1323,7 +1566,7 @@ const NET_LABEL = {
   strict: 'Strict: calls work with people on normal home networks, but can fail with another strict network (some mobile data, offices).',
   blocked: 'Blocked: direct calls only work with people on this same network. For anyone else, switch to mobile data or another wifi.'
 };
-let netType = '', netChecked = 0, netCheck = null;
+let netType = '', netChecked = 0, netCheck = null, netV6 = false;
 
 function checkNetwork(force) {
   if (netCheck) return netCheck;
@@ -1344,6 +1587,11 @@ async function probe() {
     });
     await pc.setLocalDescription(await pc.createOffer());
     await done;
+    // A public IPv6 address: no address sharing, so two phones with one usually connect directly.
+    netV6 = found.some(c => {
+      const addr = c.address || c.candidate.split(' ')[4] || '';
+      return addr.includes(':') && !/^(fe80|fc|fd)/i.test(addr);
+    });
     const mapped = found.filter(c => (c.type || (c.candidate.match(/ typ (\w+)/) || [])[1]) === 'srflx');
     if (!mapped.length) return 'blocked';
     const ports = {};
@@ -1411,15 +1659,19 @@ async function receiving(peerId) {
 
 async function renderDetails() {
   if ($('details').hidden) return;
-  $('detailsNet').textContent = 'Your network: ' + (NET_LABEL[netType] || 'checking…');
+  $('detailsNet').textContent = 'Your network: ' + (NET_LABEL[netType] || 'checking…') +
+    (netType ? (netV6 ? ' Has IPv6, which helps reach other phones on mobile data.' : ' No IPv6.') : '');
   const list = $('detailsList');
   const items = [];
   for (const p of people.values()) {
     const path = p.peerId ? await connectionPath(p.peerId) : '';
     const video = p.peerId && !p.reconnecting ? await receiving(p.peerId) : '';
     const li = el('li', '', p.name || 'Someone');
-    const sub = p.reconnecting ? 'Reconnecting…' : path ? 'Direct connection, ' + path : (p.stream ? 'Connected' : 'Connecting…');
-    const theirs = p.net ? ' · their network: ' + p.net : '';
+    const helper = p.relayVia && byPeer.get(p.relayVia);
+    const sub = p.reconnecting ? 'Reconnecting…'
+      : p.relayVia ? `No direct connection: passed along by ${helper && helper.name ? helper.name + '\'s' : 'another'} phone`
+      : path ? 'Direct connection, ' + path : (p.stream ? 'Connected' : 'Connecting…');
+    const theirs = p.net ? ' · their network: ' + p.net + (p.v6 ? ', IPv6' : '') : '';
     li.append(el('span', 'd-sub', sub + theirs));
     if (video) li.append(el('span', 'd-sub', 'Video: ' + video));
     items.push(li);

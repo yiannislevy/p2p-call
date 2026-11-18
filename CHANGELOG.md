@@ -3,6 +3,22 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.8.0
+
+Calls that connect more often, and clearer voice on bad connections. Still no server:
+
+- **Passed along by someone in the call.** When two people can't connect to each other
+  directly (both on networks that block it) but both are connected to a third person, that
+  person's phone passes each one's video and sound to the other. Nobody sees anything they
+  wouldn't see in the call anyway. The details panel says who is passing whom along. This
+  fixes "they can see each other but I can't see them".
+- **Voice that survives lost packets.** Each bit of sound also rides along in the next
+  packet (audio redundancy), where both phones support it, so a lost packet no longer
+  cuts a syllable.
+- The network check now also tells whether you have IPv6, which is how two phones on mobile
+  data usually manage a direct connection.
+- Talking outlines are measured per voice, so they stay right for someone passed along.
+
 ## v1.7.0
 
 Floating video, for doing other things during a call (iPhone first):
