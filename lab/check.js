@@ -1,10 +1,12 @@
-// iPhone check: what does this phone allow a web call to do?
-// 1. camera and microphone, 2. floating (picture-in-picture) video of a stream that comes
-// through a real WebRTC connection (two connections inside this page, so nothing leaves the
-// phone), 3. what keeps running while the page is in another app.
+// Call check: what this phone and network allow a web call to do.
+// 1. the network: how it hands out public ports (asks public STUN helpers, like any call),
+// 2. camera and microphone through a call connection inside this page (nothing leaves the phone),
+// 3-5 (iPhone): floating video, what keeps running in another app, switching while floating.
+// Nothing is saved or sent: people copy the results and send them themselves.
 
 const $ = id => document.getElementById(id);
 const results = {
+  who: '', on: '', carrier: '',
   page: location.pathname,
   userAgent: navigator.userAgent,
   standalone: matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
@@ -13,6 +15,88 @@ const report = () => { $('report').textContent = JSON.stringify(results, null, 2
 const say = (id, text, ok) => { $(id).textContent = text; $(id).className = 'result ' + (ok === true ? 'ok' : ok === false ? 'bad' : ''); };
 report();
 
+for (const id of ['who', 'carrier']) $(id).addEventListener('input', () => { results[id] = $(id).value.trim().slice(0, 40); report(); });
+for (const chip of document.querySelectorAll('#netChoice .chip')) {
+  chip.addEventListener('click', () => {
+    for (const c of document.querySelectorAll('#netChoice .chip')) c.classList.toggle('on', c === chip);
+    results.on = chip.dataset.net;
+    report();
+  });
+}
+
+/* 1. network: how does it hand out public ports? Each call connection asks public helpers
+   which address and port the network gave it. Ports that stay the same for every helper are
+   easy; ports that change per helper need the other side to be easy, unless they change in a
+   predictable order (that's what port guessing would use). */
+const HELPERS = ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302',
+  'stun:stun3.l.google.com:19302', 'stun:stun4.l.google.com:19302', 'stun:stun.cloudflare.com:3478'];
+
+async function askHelpers() {
+  const pc = new RTCPeerConnection({ iceServers: HELPERS.map(urls => ({ urls })) });
+  pc.createDataChannel('check');
+  const found = [];
+  const done = new Promise(res => {
+    const t = setTimeout(res, 5000);
+    pc.onicecandidate = e => { if (!e.candidate) { clearTimeout(t); res(); } else found.push(e.candidate); };
+  });
+  await pc.setLocalDescription(await pc.createOffer());
+  await done;
+  pc.close();
+  return found.map(c => {
+    const f = c.candidate.split(' ');
+    const r = f.indexOf('rport');
+    return { type: c.type || f[7], addr: c.address || f[4] || '', port: Number(c.port || f[5]),
+      base: Number(c.relatedPort || (r > 0 ? f[r + 1] : 0)) || 0, proto: String(c.protocol || f[2]).toLowerCase() };
+  });
+}
+
+function judge(rounds) {
+  const all = rounds.flat();
+  if (!all.length) return { verdict: 'blocked' };
+  const same = rounds.every(r => new Set(r).size <= 1);
+  if (same) return { verdict: 'same port for everyone' };
+  const sorted = [...all].sort((a, b) => a - b);
+  const span = sorted[sorted.length - 1] - sorted[0];
+  const steps = sorted.slice(1).map((p, i) => p - sorted[i]).filter(d => d > 0);
+  const step = steps.length ? Math.min(...steps) : 0;
+  if (span <= all.length * 8) return { verdict: 'changes, in order', step };
+  return { verdict: 'changes, at random' };
+}
+
+const VERDICT = {
+  'same port for everyone': ['Good: your network keeps one address for everyone, so direct calls work with almost anyone.', true],
+  'changes, in order': ['Your network gives each destination a new port, but in order. Calls with another network like this fail today; this is the case port guessing could fix.', null],
+  'changes, at random': ['Your network gives each destination a random port. Calls work with people on normal wifi, but not with another network like this.', false],
+  blocked: ['Your network blocks this kind of connection. Calls only work from another network (mobile data or other wifi).', false]
+};
+
+$('net').addEventListener('click', async () => {
+  $('net').disabled = true;
+  say('netResult', 'Testing…');
+  try {
+    const t0 = Date.now();
+    const rounds = [];
+    let preserves = false, ipv6 = false;
+    for (let i = 0; i < 3; i++) {
+      const cands = await askHelpers();
+      const mapped = cands.filter(c => c.type === 'srflx' && c.proto === 'udp' && !c.addr.includes(':'));
+      rounds.push(mapped.map(c => c.port));
+      if (mapped.some(c => c.base && c.port === c.base)) preserves = true;
+      if (cands.some(c => c.addr.includes(':') && !/^(fe80|fc|fd)/i.test(c.addr) && !c.addr.endsWith('.local'))) ipv6 = true;
+    }
+    const j = judge(rounds);
+    const run = { on: results.on || 'not said', ...j, ports: rounds.map(r => r.join(' ')), keepsPhonePort: preserves, ipv6, seconds: Math.round((Date.now() - t0) / 1000) };
+    (results.network = results.network || []).push(run);
+    const [text, ok] = VERDICT[j.verdict];
+    say('netResult', text + (ipv6 ? ' It also has IPv6, which helps.' : ' No IPv6.'), ok);
+  } catch (e) {
+    (results.network = results.network || []).push({ on: results.on || 'not said', error: `${e.name}: ${e.message}` });
+    say('netResult', 'The test could not run: ' + e.name, false);
+  }
+  $('net').disabled = false;
+  report();
+});
+
 let local = null, rx = null;
 
 /* 1. camera and microphone, sent through a loopback call connection */
@@ -20,6 +104,7 @@ $('start').addEventListener('click', async () => {
   try {
     local = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
     $('local').srcObject = local;
+    $('local').classList.add('live');
     const a = new RTCPeerConnection(), b = new RTCPeerConnection();
     rx = b;
     const gathered = pc => pc.iceGatheringState === 'complete' ? Promise.resolve() : new Promise(r => {
@@ -28,7 +113,7 @@ $('start').addEventListener('click', async () => {
       setTimeout(r, 4000);
     });
     const remote = new MediaStream();
-    b.ontrack = e => { remote.addTrack(e.track); $('remote').srcObject = remote; $('remote').play().catch(() => {}); };
+    b.ontrack = e => { remote.addTrack(e.track); $('remote').srcObject = remote; $('remote').classList.add('live'); $('remote').play().catch(() => {}); };
     for (const t of local.getTracks()) a.addTrack(t, local);
     await a.setLocalDescription(await a.createOffer());
     await gathered(a);
@@ -45,7 +130,6 @@ $('start').addEventListener('click', async () => {
     say('startResult', 'Camera and microphone work.', true);
     $('pip').disabled = false;
     $('bg').disabled = false;
-    $('swA').disabled = false;
     $('swB').disabled = false;
     prepareSwitch();
   } catch (e) {
@@ -256,7 +340,7 @@ function startSwitching(mode) {
   say('swResult', 'Floating. Go to another app and watch it switch, then come back and close it.');
   report();
 }
-for (const [id, mode] of [['swA', 'picture'], ['swB', 'video']]) {
+for (const [id, mode] of [['swB', 'video']]) {
   $(id).addEventListener('click', async () => {
     const v = $('sw');
     if (mode === 'picture' && v.srcObject !== swStream) { v.srcObject = swStream; }
@@ -264,6 +348,9 @@ for (const [id, mode] of [['swA', 'picture'], ['swB', 'video']]) {
     catch (e) { results.switching = { mode, error: `${e.name}: ${e.message}` }; say('swResult', 'Could not float: ' + e.name, false); report(); }
   });
 }
+
+$('share').hidden = !navigator.share;
+$('share').addEventListener('click', () => { navigator.share({ title: 'Call check results', text: $('report').textContent }).catch(() => {}); });
 
 $('copy').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('report').textContent); $('copy').textContent = 'Copied'; }
