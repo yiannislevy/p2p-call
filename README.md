@@ -81,7 +81,9 @@ What to know:
   call to see what is actually arriving.
 - A direct connection is needed. It works on almost all home networks and most mobile
   data, but some office, hotel or public wifi blocks it. The app tells you when your
-  network blocks calls and which side to switch to mobile data or another wifi.
+  network blocks calls and which side to switch to mobile data or another wifi. In a group,
+  two people who can't connect to each other are passed along by someone connected to both
+  (their phone forwards the video; still no server).
 - There is no ringing or notifications: people join when they open the room. The rooms
   screen shows who is already in.
 - Dropped connections (switching wifi to mobile data, a tunnel) reconnect on their own; the

@@ -25,7 +25,7 @@ const fastTimers = 'fast-timers' in args;
 const FAST = {
   'presence.js': { HEARTBEAT_MS: 3000, EXPIRE_MS: 9000, SWEEP_MS: 1000 },
   'app.js': { GRACE_MS: 6000, REPAIR_MS: 3000, MAX_WAIT_MS: 30000, AWAY_GRACE_MS: 5000, DOWN_MS: 5000,
-    RECHECK_MS: 3000, REJOIN_GAP_MS: 2000, UNSEEN_MS: 4000 }
+    RECHECK_MS: 3000, REJOIN_GAP_MS: 2000, UNSEEN_MS: 4000, RELAY_AFTER_MS: 4000, RELAY_WAIT_MS: 6000, TEST_HOOKS: 1 }
 };
 
 // Everything the site needs: top-level page files plus vendor/. Tooling is left out.
