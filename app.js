@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.6.3';
+const VERSION = '1.7.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -554,6 +554,7 @@ function leaveCall() {
   if (!inCall) return;
   forgetActive();
   unswap();
+  endFloat();
   inCall = false;
   const old = room, st = stateAction;
   // Tell the others this is a real goodbye, not a dropped connection, then leave.
@@ -940,6 +941,7 @@ async function watchSpeaking() {
     const selfTalking = inCall && micOn && people.size > 0 && Date.now() - selfSpokeAt < SPEAK_HOLD_MS;
     $('self').classList.toggle('speaking', selfTalking);
     if (swapped) swapped.me.classList.toggle('speaking', selfTalking);
+    updateFloat();
   } catch {} finally {
     speakBusy = false;
   }
@@ -1052,6 +1054,7 @@ function renderTile(p) {
   p.ui.name.textContent = p.name || '…';
   p.ui.root.classList.toggle('muted', !p.mic);
   p.ui.root.classList.toggle('reconnecting', p.reconnecting);
+  if (inCall) updateFloat();
 }
 
 function layout() {
@@ -1060,6 +1063,7 @@ function layout() {
   $('grid').dataset.n = String(Math.min(n, 5));
   $('self').classList.toggle('full', n === 0);
   $('alone').hidden = n > 0 || !inCall;
+  if (inCall) updateFloat();
   updateMeta();
   renderDetails();
 }
@@ -1101,7 +1105,115 @@ function unswap() {
 
 $('self').addEventListener('click', swapView);
 
-/* keyboard (computers): M mute, V camera, S swap, I invite, D details, Esc close */
+/* floating video (picture-in-picture): the person talking, in a small window that stays over
+   other apps, like FaceTime. One video element is kept playing for it during the call (iOS
+   only floats a video that is already playing); it shows whoever is talking, switching
+   calmly, and a card with their initial when their camera is off. */
+
+const FLOAT_SWITCH_MS = 1500;    // show someone at least this long before switching to another talker
+const floatVideo = $('floatVideo');
+const floatStream = new MediaStream();
+let floatTarget = null, floatSince = 0;
+
+const canFloat = () => !!(floatVideo.requestPictureInPicture && document.pictureInPictureEnabled) ||
+  typeof floatVideo.webkitSetPresentationMode === 'function';
+const isFloating = () => document.pictureInPictureElement === floatVideo || floatVideo.webkitPresentationMode === 'picture-in-picture';
+
+function pickFloatTarget() {
+  const list = [...people.values()].filter(p => !p.leaving);
+  if (!list.length) return null;
+  const cur = list.includes(floatTarget) ? floatTarget : null;
+  const talker = list.filter(p => p.speaking).sort((x, y) => (y.spokeAt || 0) - (x.spokeAt || 0))[0];
+  if (talker && talker !== cur && (!cur || (!cur.speaking && Date.now() - floatSince >= FLOAT_SWITCH_MS))) return talker;
+  return cur || list.find(p => p.ui.ph.hidden) || list[0];
+}
+
+// A still card for someone whose camera is off (or nobody yet): their initial and name.
+const card = { canvas: null, track: null, key: '', drawnAt: 0 };
+function cardTrack(p) {
+  if (!card.canvas) {
+    card.canvas = document.createElement('canvas');
+    card.canvas.width = 360; card.canvas.height = 480;
+    try { card.track = card.canvas.captureStream(5).getVideoTracks()[0]; } catch { card.track = null; }
+  }
+  const name = p ? (p.name || 'Someone') : 'Waiting for others';
+  const note = p ? p.ui.status.textContent : '';
+  const key = name + '|' + note;
+  if (key !== card.key || Date.now() - card.drawnAt > 1000) {   // redraw now and then so the video keeps going
+    card.key = key; card.drawnAt = Date.now();
+    const g = card.canvas.getContext('2d');
+    g.fillStyle = '#26251f'; g.fillRect(0, 0, 360, 480);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    if (p) {
+      g.fillStyle = '#4a4943'; g.beginPath(); g.arc(180, 205, 70, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#f2f1ed'; g.font = '600 64px -apple-system, system-ui, sans-serif';
+      g.fillText(name.charAt(0).toUpperCase(), 180, 208);
+    }
+    g.fillStyle = '#f2f1ed'; g.font = '500 28px -apple-system, system-ui, sans-serif';
+    g.fillText(name.slice(0, 22), 180, p ? 320 : 240);
+    if (note) { g.fillStyle = 'rgba(242,241,237,.7)'; g.font = '22px -apple-system, system-ui, sans-serif'; g.fillText(note, 180, 360); }
+  }
+  return card.track;
+}
+
+function updateFloat() {
+  $('cFloat').hidden = !inCall || !canFloat();
+  if (!inCall) return;
+  $('cFloat').disabled = !people.size && !isFloating();
+  const t = pickFloatTarget();
+  if (t !== floatTarget) { floatTarget = t; floatSince = Date.now(); }
+  const vt = t && t.ui.ph.hidden && t.stream && t.stream.getVideoTracks()[0];
+  const track = (vt && vt.readyState === 'live') ? vt : cardTrack(t);
+  if (!track) return;
+  const shown = floatStream.getVideoTracks();
+  if (shown[0] !== track) {
+    // Swap the track inside the same stream, so a floating window stays open and switches.
+    floatStream.addTrack(track);
+    for (const old of shown) floatStream.removeTrack(old);
+  }
+  if (floatVideo.srcObject !== floatStream) floatVideo.srcObject = floatStream;
+  if (floatVideo.paused) floatVideo.play().catch(() => {});
+}
+
+async function toggleFloat() {
+  if (!inCall) return;
+  try {
+    if (isFloating()) {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else floatVideo.webkitSetPresentationMode('inline');
+      return;
+    }
+    updateFloat();
+    // No waiting before this call: iOS only allows it straight from the tap.
+    if (floatVideo.requestPictureInPicture && document.pictureInPictureEnabled) await floatVideo.requestPictureInPicture();
+    else floatVideo.webkitSetPresentationMode('picture-in-picture');
+  } catch {
+    toast('The video can\'t float right now. Try again in a moment.');
+  }
+}
+
+function endFloat() {
+  try { if (document.pictureInPictureElement === floatVideo) document.exitPictureInPicture().catch(() => {}); } catch {}
+  try { if (floatVideo.webkitPresentationMode === 'picture-in-picture') floatVideo.webkitSetPresentationMode('inline'); } catch {}
+  for (const t of floatStream.getTracks()) floatStream.removeTrack(t);
+  floatVideo.srcObject = null;
+  floatTarget = null;
+  $('cFloat').hidden = true;
+  $('cFloat').classList.remove('active');
+}
+
+const floatChanged = () => {
+  const on = isFloating();
+  $('cFloat').classList.toggle('active', on);
+  $('cFloat').querySelector('.lb').textContent = on ? 'Floating' : 'Float';
+  $('cFloat').setAttribute('aria-pressed', String(on));
+};
+floatVideo.addEventListener('enterpictureinpicture', floatChanged);
+floatVideo.addEventListener('leavepictureinpicture', floatChanged);
+floatVideo.addEventListener('webkitpresentationmodechanged', floatChanged);
+$('cFloat').addEventListener('click', toggleFloat);
+
+/* keyboard (computers): M mute, V camera, P float, S swap, I invite, D details, Esc close */
 
 document.addEventListener('keydown', e => {
   if (!inCall || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
@@ -1112,6 +1224,7 @@ document.addEventListener('keydown', e => {
   if (!$('sheet').hidden) return;   // the invite panel is open
   if (k === 'm') $('cMic').click();
   else if (k === 'v') $('cCam').click();
+  else if (k === 'p') { if (!$('cFloat').hidden) toggleFloat(); }
   else if (k === 's') swapView();
   else if (k === 'i') $('topInvite').click();
   else if (k === 'd') { if ($('details').hidden) $('whoBtn').click(); else $('details').hidden = true; }

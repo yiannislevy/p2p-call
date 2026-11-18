@@ -166,6 +166,9 @@ h2 { font-size: 28px; font-weight: 650; letter-spacing: -.02em; margin-top: 6px;
 .ctl.is-off .ring { background: #f2f1ed; color: #111; }
 .ctl.end .ring { background: #c5372c; }
 .ctl:disabled { opacity: .4; }
+.ctl.active .ring { background: #f2f1ed; color: #111; }
+/* the video that floats over other apps: kept playing, but not shown on the call screen */
+#floatVideo { position: absolute; left: 0; bottom: 0; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
 
 /* toasts */
 #toasts {
