@@ -86,6 +86,9 @@ What to know:
   screen shows who is already in.
 - Dropped connections (switching wifi to mobile data, a tunnel) reconnect on their own; the
   others see "Reconnecting…" rather than you leaving.
+- On iPhone, Float puts the person talking in a small window over other apps. While you are
+  in another app you stay heard and keep hearing everyone; iPhones pause your own camera
+  then, and the others see "In another app".
 
 ## Development
 

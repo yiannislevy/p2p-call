@@ -3,6 +3,16 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.7.0
+
+Floating video, for doing other things during a call (iPhone first):
+
+- A Float button in the call puts the video in a small window that stays over other apps,
+  like FaceTime. It shows whoever is talking and switches calmly between talkers; someone
+  with their camera off is shown as a card with their initial. P on a keyboard.
+- While you are in another app you stay heard and keep hearing everyone (checked on an
+  iPhone with iOS 26). The phone pauses your own camera; the others see "In another app".
+
 ## v1.6.3
 
 Two causes of black video and missing sound, found in the code and fixed at the source:

@@ -45,6 +45,9 @@ $('start').addEventListener('click', async () => {
     say('startResult', 'Camera and microphone work.', true);
     $('pip').disabled = false;
     $('bg').disabled = false;
+    $('swA').disabled = false;
+    $('swB').disabled = false;
+    prepareSwitch();
   } catch (e) {
     results.camera = `${e.name}: ${e.message}`;
     say('startResult', 'Could not start: ' + e.name, false);
@@ -190,6 +193,76 @@ async function audioPackets() {
     (await rx.getStats()).forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') n += r.packetsReceived || 0; });
     return n;
   } catch { return null; }
+}
+
+/* 4. switching while floating: the app swaps who is shown inside one floating video.
+   A: swap the track inside the same stream (what the app does). B: give the video a new stream. */
+let card = null, swTimer = 0;
+function cardTrack() {
+  if (card) return card.track;
+  const c = document.createElement('canvas');
+  c.width = 360; c.height = 480;
+  const g = c.getContext('2d');
+  let n = 0;
+  const draw = () => {
+    g.fillStyle = n++ % 2 ? '#2f5d8a' : '#2f6b4a'; g.fillRect(0, 0, 360, 480);
+    g.fillStyle = '#fff'; g.font = '600 64px -apple-system, sans-serif'; g.textAlign = 'center';
+    g.fillText('S', 180, 260); g.font = '24px -apple-system, sans-serif'; g.fillText(new Date().toLocaleTimeString(), 180, 330);
+  };
+  draw();
+  setInterval(draw, 500);
+  card = { track: c.captureStream(10).getVideoTracks()[0] };
+  return card.track;
+}
+const swStream = new MediaStream();
+function prepareSwitch() {
+  const v = $('sw');
+  const cam = $('remote').srcObject && $('remote').srcObject.getVideoTracks()[0];
+  if (!cam) return;
+  swStream.addTrack(cam);
+  v.srcObject = swStream;
+  v.play().catch(() => {});
+  cardTrack();
+}
+function startSwitching(mode) {
+  const v = $('sw');
+  const cam = $('remote').srcObject.getVideoTracks()[0];
+  const sw = results.switching = { mode, switches: 0, windowClosedBySwitch: 0, framesWhileFloating: 0 };
+  let shown = 0;
+  const count = () => { if (document.pictureInPictureElement === v) shown++; v.requestVideoFrameCallback && v.requestVideoFrameCallback(count); };
+  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(count);
+  let switching = false;
+  v.onleavepictureinpicture = () => { if (switching) sw.windowClosedBySwitch++; };
+  clearInterval(swTimer);
+  swTimer = setInterval(() => {
+    if (document.pictureInPictureElement !== v) {
+      if (sw.switches) { clearInterval(swTimer); sw.framesWhileFloating = shown; finish(); }
+      return;
+    }
+    switching = true;
+    const next = (v.srcObject.getVideoTracks()[0] === cam) ? cardTrack() : cam;
+    if (mode === 'picture') {
+      const old = swStream.getVideoTracks();
+      swStream.addTrack(next);
+      for (const t of old) swStream.removeTrack(t);
+    } else {
+      v.srcObject = new MediaStream([next]);
+      v.play().catch(() => {});
+    }
+    sw.switches++;
+    setTimeout(() => { switching = false; sw.framesWhileFloating = shown; report(); }, 1500);
+  }, 3000);
+  const finish = () => say('swResult', `Switched ${sw.switches} times. The floating window closed on a switch ${sw.windowClosedBySwitch} times. Did the picture change in the window?`, sw.windowClosedBySwitch === 0);
+  say('swResult', 'Floating. Go to another app and watch it switch, then come back and close it.');
+  report();
+}
+for (const [id, mode] of [['swA', 'picture'], ['swB', 'video']]) {
+  $(id).addEventListener('click', async () => {
+    const v = $('sw');
+    if (mode === 'picture' && v.srcObject !== swStream) { v.srcObject = swStream; }
+    try { await v.requestPictureInPicture(); startSwitching(mode); }
+    catch (e) { results.switching = { mode, error: `${e.name}: ${e.message}` }; say('swResult', 'Could not float: ' + e.name, false); report(); }
+  });
 }
 
 $('copy').addEventListener('click', async () => {
