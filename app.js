@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.9.0';
+const VERSION = '1.9.1';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -1484,7 +1484,6 @@ $('self').addEventListener('click', swapView);
 
 const FLOAT_SWITCH_MS = 1500;    // show someone at least this long before switching to another talker
 const floatVideo = $('floatVideo');
-const floatStream = new MediaStream();
 let floatTarget = null, floatSince = 0;
 
 const canFloat = () => !!(floatVideo.requestPictureInPicture && document.pictureInPictureEnabled) ||
@@ -1537,14 +1536,13 @@ function updateFloat() {
   const vt = t && t.ui.ph.hidden && t.stream && t.stream.getVideoTracks()[0];
   const track = (vt && vt.readyState === 'live') ? vt : cardTrack(t);
   if (!track) return;
-  const shown = floatStream.getVideoTracks();
-  if (shown[0] !== track) {
-    // Swap the track inside the same stream, so a floating window stays open and switches.
-    floatStream.addTrack(track);
-    for (const old of shown) floatStream.removeTrack(old);
-  }
-  if (floatVideo.srcObject !== floatStream) floatVideo.srcObject = floatStream;
-  if (floatVideo.paused) floatVideo.play().catch(() => {});
+  const current = floatVideo.srcObject && floatVideo.srcObject.getVideoTracks()[0];
+  if (current !== track) {
+    // A new stream for each person: an open floating window stays open and switches
+    // (checked on an iPhone with iOS 26.5: 10 switches, the window never closed).
+    floatVideo.srcObject = new MediaStream([track]);
+    floatVideo.play().catch(() => {});
+  } else if (floatVideo.paused) floatVideo.play().catch(() => {});
 }
 
 async function toggleFloat() {
@@ -1567,7 +1565,6 @@ async function toggleFloat() {
 function endFloat() {
   try { if (document.pictureInPictureElement === floatVideo) document.exitPictureInPicture().catch(() => {}); } catch {}
   try { if (floatVideo.webkitPresentationMode === 'picture-in-picture') floatVideo.webkitSetPresentationMode('inline'); } catch {}
-  for (const t of floatStream.getTracks()) floatStream.removeTrack(t);
   floatVideo.srcObject = null;
   floatTarget = null;
   $('cFloat').hidden = true;
