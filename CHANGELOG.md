@@ -3,6 +3,11 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.9.1
+
+- Floating video: switching between people now uses the way an iPhone (iOS 26.5) was seen to
+  handle cleanly: 10 switches in a row, the floating window never closed.
+
 ## v1.9.0
 
 Rooms screen:
