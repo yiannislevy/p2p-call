@@ -119,3 +119,69 @@ test('a muted person or a camera that is off never sets off resends', async ({ b
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });
+
+// Test-only: the connection library skips one update offering our camera and microphone,
+// as it can when the update comes while it is still finishing the previous one.
+const skipOneUpdate = () => {
+  window.__resends = 0;
+  window.__skipUpdates = 0;
+  const P = window.RTCPeerConnection.prototype;
+  const desc = Object.getOwnPropertyDescriptor(P, 'onnegotiationneeded');
+  Object.defineProperty(P, 'onnegotiationneeded', {
+    configurable: true,
+    get() { return desc.get.call(this); },
+    set(h) {
+      desc.set.call(this, h && function (e) {
+        if (this.connectionState === 'connected' && window.__skipUpdates > 0) { window.__skipUpdates--; return; }
+        return h.call(this, e);
+      });
+    }
+  });
+  const removeTrack = P.removeTrack;
+  P.removeTrack = function (...a) { window.__resends++; return removeTrack.apply(this, a); };
+};
+
+test('an update the connection library skipped is offered again by the sender', async ({ browser }) => {
+  const a = await person(browser), b = await person(browser);
+  // Yianni sends nothing himself, so only Sarra's own update can carry her camera to him.
+  await a.page.addInitScript(instrument, 1000);
+  await b.page.addInitScript(skipOneUpdate);
+  await b.page.addInitScript(() => { window.__skipUpdates = 1; });
+  const link = await createRoom(a.page, 'family');
+  await joinFromHome(a.page, 'family', 'Yianni');
+  await joinFromLink(b.page, link, 'Sarra');
+  await playingVideos(a.page, 20000).toBe(1);
+  expect(await flowing(a.page)).toEqual({ video: true, audio: true });
+  // Sarra's own app fixed it: nobody had to ask her to send again.
+  expect(await b.page.evaluate(() => [window.__skipUpdates, window.__resends])).toEqual([0, 0]);
+  expectClean(a, b);
+  await a.context.close(); await b.context.close();
+});
+
+test('video that arrives but is not shown on screen is shown again', async ({ browser }) => {
+  const a = await person(browser), b = await person(browser);
+  const link = await createRoom(a.page, 'family');
+  await joinFromHome(a.page, 'family', 'Yianni');
+  await joinFromLink(b.page, link, 'Sarra');
+  await playingVideos(a.page).toBe(1);
+  // Yianni's phone stops drawing Sarra's video although it keeps arriving (black tile),
+  // and playing it again doesn't help; only pointing the element at the stream again does.
+  await a.page.evaluate(() => {
+    const v = document.querySelector('#grid .tile video');
+    const real = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'srcObject');
+    v.pause();
+    v.play = () => Promise.resolve();
+    Object.defineProperty(v, 'srcObject', {
+      configurable: true,
+      get() { return real.get.call(v); },
+      set(s) { real.set.call(v, s); if (s) { window.__fixed = true; delete v.play; delete v.srcObject; } }
+    });
+  });
+  await poll(a.page, () => window.__fixed === true, undefined, 20000).toBe(true);
+  const shown = () => a.page.evaluate(() => document.querySelector('#grid .tile video').__shown);
+  const before = await shown();
+  await a.page.waitForTimeout(1500);
+  expect(await shown()).toBeGreaterThan(before + 5);
+  expectClean(a, b);
+  await a.context.close(); await b.context.close();
+});

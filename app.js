@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.6.2';
+const VERSION = '1.6.3';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -660,7 +660,12 @@ function setStream(p, stream) {
   const v = p.ui.video;
   if (v.srcObject !== stream) v.srcObject = stream;
   v.play().catch(() => { $('tapAudio').hidden = false; });
-  stream.addEventListener('addtrack', () => renderTile(p));
+  if (!stream.__watched) {
+    stream.__watched = true;
+    const changed = () => { if (p.stream === stream && p.ui.video.srcObject === stream) reattach(p.ui.video, stream); renderTile(p); };
+    stream.addEventListener('addtrack', changed);
+    stream.addEventListener('removetrack', changed);
+  }
   renderTile(p);
 }
 
@@ -754,13 +759,14 @@ async function watchMedia() {
       // A video that the browser paused (sound blocked until a tap) would look black and silent.
       if (p.ui.video.paused && p.ui.video.srcObject) p.ui.video.play().catch(() => { $('tapAudio').hidden = false; });
       if (now - (p.linkedAt || 0) < STARVED_MS) continue;
-      const rx = { v: 0, a: 0 };
+      const rx = { v: 0, a: 0, d: 0 };
       (await pc.getStats()).forEach(s => {
-        if (s.type === 'inbound-rtp' && s.kind === 'video') rx.v += s.bytesReceived || 0;
+        if (s.type === 'inbound-rtp' && s.kind === 'video') { rx.v += s.bytesReceived || 0; rx.d += s.framesDecoded || 0; }
         if (s.type === 'inbound-rtp' && s.kind === 'audio') rx.a += s.bytesReceived || 0;
       });
-      const prev = p.rx || { v: -1, a: -1 };
+      const prev = p.rx || { v: -1, a: -1, d: -1 };
       p.rx = rx;
+      checkShown(p, rx.d > prev.d && prev.d >= 0, now);
       const videoStuck = p.hasVideo !== false && p.cam && rx.v <= prev.v;
       const audioStuck = p.hasAudio !== false && rx.a <= prev.a;   // sound keeps flowing even when muted
       // Their app is in the background and its camera paused (iPhone): show that, don't ask.
@@ -778,6 +784,43 @@ async function watchMedia() {
     }
   } catch {} finally {
     mediaBusy = false;
+  }
+}
+
+// Video arrives and is decoded, but the element puts nothing on screen: show it again.
+const SHOWN_STUCK_CHECKS = 2;   // consecutive health checks (2 s apart)
+function checkShown(p, decoding, now) {
+  const v = p.ui.video;
+  const shown = v.__shown || 0;
+  const prevShown = p.shownAt;
+  p.shownAt = shown;
+  const watchable = v.requestVideoFrameCallback && document.visibilityState === 'visible' &&
+    p.stream && v.srcObject === p.stream && p.ui.ph.hidden && v.offsetWidth > 0;
+  if (!watchable || !decoding || prevShown == null || shown > prevShown) { p.shownStuck = 0; return; }
+  if (++p.shownStuck < SHOWN_STUCK_CHECKS || now - (p.reattachedAt || 0) < 10000) return;
+  p.shownStuck = 0;
+  p.reattachedAt = now;
+  reattach(v, p.stream);
+}
+
+// Our own side: a camera or microphone added to a connection that the connection library
+// never offered to the other side (it can skip an update that comes in while it is busy
+// finishing the previous one). Offer it again; the other side then gets it within a second.
+const UNOFFERED_MS = 3000;
+function checkOffered() {
+  let all = {};
+  try { all = room ? room.getPeers() : {}; } catch {}
+  const now = Date.now();
+  for (const info of Object.values(all)) {
+    const pc = info && info.connection;
+    if (!pc || pc.connectionState !== 'connected' || pc.signalingState !== 'stable' || !pc.getTransceivers) continue;
+    const pending = pc.getTransceivers().some(t => !t.stopped && t.sender.track &&
+      /send/.test(t.direction) && !/send/.test(t.currentDirection || ''));
+    if (!pending) { pc.__pendingSince = 0; continue; }
+    pc.__pendingSince = pc.__pendingSince || now;
+    if (now - pc.__pendingSince < UNOFFERED_MS || now - (pc.__offeredAt || 0) < UNOFFERED_MS) continue;
+    pc.__offeredAt = now;
+    try { pc.onnegotiationneeded && pc.onnegotiationneeded(new Event('negotiationneeded')); } catch {}
   }
 }
 
@@ -804,6 +847,7 @@ function linkStates() {
 function checkHealth() {
   if (!inCall || !room || rejoining) return;
   watchMedia();
+  checkOffered();
   recoverLocalTracks(false);
   checkUnseen();
   renderDetails();   // keeps the connection details current while they are open
@@ -956,12 +1000,29 @@ $('tapAudio').addEventListener('click', () => {
 
 /* tiles */
 
+// Frames this video element actually put on screen (not just received and decoded).
+function countShownFrames(video) {
+  video.__shown = 0;
+  if (!video.requestVideoFrameCallback) return;
+  const tick = () => { video.__shown++; video.requestVideoFrameCallback(tick); };
+  video.requestVideoFrameCallback(tick);
+}
+
+// Point a video element at a stream again from scratch (Safari can keep showing black for a
+// track that was added to a stream it is already playing).
+function reattach(v, stream) {
+  v.srcObject = null;
+  v.srcObject = stream;
+  v.play().catch(() => { $('tapAudio').hidden = false; });
+}
+
 function makeTile() {
   const root = el('div', 'tile');
   const video = el('video');
   video.autoplay = true;
   video.playsInline = true;
   video.setAttribute('playsinline', '');
+  countShownFrames(video);
   const ph = el('div', 'ph');
   const avatar = el('div', 'avatar');
   const status = el('div', 'ph-status');
