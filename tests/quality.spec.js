@@ -99,3 +99,23 @@ test('flipping the camera keeps the quality settings', async ({ browser }) => {
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });
+
+test('voice is sent with redundancy, so a lost packet does not cut a word', async ({ browser }) => {
+  const [a, b] = await people(browser, 2);
+  const link = await createRoom(a.page, 'family');
+  await joinFromHome(a.page, 'family', 'Yianni');
+  await joinFromLink(b.page, link, 'Sarra');
+  await playingVideos(a.page).toBe(1);
+  // The voice format both sides agreed on: redundancy first (the browser's statistics name
+  // only the inner format, so read the agreement itself).
+  const agreed = page => page.evaluate(() => window.__pcs.filter(p => p.connectionState === 'connected').map(pc => {
+    const sdp = (pc.currentRemoteDescription || {}).sdp || '';
+    const m = sdp.match(/^m=audio \S+ \S+ (\d+)/m);
+    const red = sdp.match(/^a=rtpmap:(\d+) red\/48000/m);
+    return !!(m && red && m[1] === red[1]);
+  }));
+  await expect.poll(() => agreed(a.page), { timeout: 15000 }).toEqual([true]);
+  await expect.poll(() => agreed(b.page), { timeout: 15000 }).toEqual([true]);
+  expectClean(a, b);
+  await a.context.close(); await b.context.close();
+});
