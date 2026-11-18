@@ -27,9 +27,13 @@ test('rooms move to another browser or the home screen app by copy and paste, wi
 
   // In the other browser: Paste invite links.
   await b.page.goto('/current/');
+  // Typed or pasted into the box: it says what it found, and the button says how many it adds.
   await b.page.click('#pasteLinksBtn');
-  await expect(b.page.locator('#importText')).toBeFocused();
+  await expect(b.page.locator('#importBtn')).toBeDisabled();
   await b.page.fill('#importText', copied);
+  await expect(b.page.locator('#importFound')).toHaveText('Found 3 rooms: Mates, family, gf');
+  await expect(b.page.locator('#importBtn')).toHaveText('Add 3 rooms');
+  await expect(b.page.locator('#pasteBtn')).not.toHaveClass(/primary/);   // one black button at a time
   await b.page.click('#importBtn');
   await expect(b.page.locator('#home')).toBeVisible();
   await expect(b.page.locator('#toasts')).toContainText('Added 3 rooms');
@@ -46,11 +50,13 @@ test('rooms move to another browser or the home screen app by copy and paste, wi
   expect(await linkOf(b.page, 'Mates')).toBe(await linkOf(a.page, 'Mates'));
   expect(await linkOf(b.page, 'Mates')).toContain('room=friends');
 
-  // Pasting again adds nothing twice.
+  // Pasting again adds nothing twice, and says so.
   await b.page.click('#pasteLinksBtn');
   await b.page.fill('#importText', copied);
-  await b.page.click('#importBtn');
-  await expect(b.page.locator('#toasts')).toContainText('You already had these rooms');
+  await expect(b.page.locator('#importFound')).toContainText('Mates (already here)');
+  await expect(b.page.locator('#importBtn')).toBeDisabled();
+  await expect(b.page.locator('#importBtn')).toHaveText('You already have these');
+  await b.page.click('[data-back]:visible');
   expect(await shownRooms(b.page)).toEqual(['Mates', 'family', 'gf']);
 
   // Your own names stay after a reload, and show before joining.
@@ -74,11 +80,21 @@ test('a pasted message with an invite link adds the room, and the Paste button r
   await expect(b.page.locator('#home')).toBeVisible();
   expect(await shownRooms(b.page)).toEqual(['family']);    // the message text is not taken as a name
 
-  // Text without links says what to paste.
+  // Text without links says what to paste; a clipboard without links says how to get them.
   await b.page.click('#pasteLinksBtn');
   await b.page.fill('#importText', 'hello there');
-  await b.page.click('#importBtn');
-  await expect(b.page.locator('#importErr')).toContainText('No invite links found');
+  await expect(b.page.locator('#importFound')).toContainText('No invite links in this text yet');
+  await expect(b.page.locator('#importBtn')).toBeDisabled();
+  await b.page.evaluate(() => navigator.clipboard.writeText('nothing useful'));
+  await b.page.click('#pasteBtn');
+  await expect(b.page.locator('#importErr')).toContainText('Your clipboard has no invite links');
+
+  // From the create screen there is a way to the paste screen too.
+  await b.page.click('[data-back]:visible');
+  await b.page.click('#addBtn');
+  await b.page.click('#toPaste');
+  await expect(b.page.locator('#pasteBtn')).toBeVisible();
+  await expect(b.page.locator('#addName')).toBeHidden();
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });

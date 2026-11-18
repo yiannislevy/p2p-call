@@ -3,6 +3,17 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.9.2
+
+Paste invite links, clearer:
+
+- The main button is now **Paste from clipboard**: one tap reads what you copied and adds
+  the rooms. If the clipboard has no links, it says how to get them.
+- Pasting or typing into the box shows straight away which rooms it found (and which you
+  already have), and the button says what it will do: "Add 3 rooms". It can't be pressed
+  while there is nothing to add, and only one button is black at a time.
+- From "Add a room", "Have invite links? Paste them instead" leads to the same screen.
+
 ## v1.9.1
 
 - Floating video: switching between people now uses the way an iPhone (iOS 26.5) was seen to

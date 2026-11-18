@@ -81,16 +81,22 @@
   <div class="actions">
     <button class="btn primary" id="saveBtn" type="button">Save room</button>
   </div>
+  <button class="text" id="toPaste" type="button">Have invite links? Paste them instead</button>
   </div>
-  <div class="field" id="importField">
-    <h3>Have invite links?</h3>
-    <label for="importText">Paste one or more invite links, or rooms copied from another browser.</label>
-    <textarea id="importText" rows="3" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="https://…#room=…&amp;key=…"></textarea>
-  </div>
-  <p class="error" id="importErr" role="alert"></p>
-  <div class="actions two">
-    <button class="btn" id="pasteBtn" type="button">Paste</button>
-    <button class="btn primary" id="importBtn" type="button">Add from links</button>
+  <div id="importPart">
+    <p class="lead">Copied your rooms, or got an invite link? Add them in one tap.</p>
+    <div class="actions">
+      <button class="btn primary" id="pasteBtn" type="button">Paste from clipboard</button>
+    </div>
+    <div class="field" id="importField">
+      <label for="importText" id="importLabel">Or paste them here</label>
+      <textarea id="importText" rows="3" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="https://…#room=…&amp;key=…"></textarea>
+    </div>
+    <p class="found" id="importFound" aria-live="polite"></p>
+    <p class="error" id="importErr" role="alert"></p>
+    <div class="actions">
+      <button class="btn" id="importBtn" type="button" disabled>Add rooms</button>
+    </div>
   </div>
 </section>
 

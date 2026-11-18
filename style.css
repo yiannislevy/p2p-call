@@ -59,9 +59,11 @@ h2 { font-size: 28px; font-weight: 650; letter-spacing: -.02em; margin-top: 6px;
   font: 15px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; outline: none; resize: vertical; -webkit-appearance: none; appearance: none;
 }
 .field h3 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
-#importField { margin-top: 38px; padding-top: 22px; border-top: 1px solid var(--line); }
-#add.pasting #importField { margin-top: 14px; padding-top: 0; border-top: 0; }
-#add.pasting #importField h3 { display: none; }
+#importField { margin-top: 30px; }
+#toPaste { margin-top: 18px; }
+.found { font-size: 15px; margin-top: 10px; }
+.found:empty { display: none; }
+.found .have { color: var(--mute); }
 .actions.two { flex-direction: row; }
 .actions.two .btn { flex: 1; width: auto; }
 .move { margin-top: 18px; }

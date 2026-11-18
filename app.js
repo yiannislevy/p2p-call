@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.9.1';
+const VERSION = '1.9.2';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -334,43 +334,77 @@ $('forgetBtn').addEventListener('click', () => {
 
 /* ---------------------------------------------------------------- add room */
 
-function openAdd(pasting) {
-  $('add').classList.toggle('pasting', !!pasting);
-  $('createPart').hidden = !!pasting;
+function addMode(pasting) {
+  $('createPart').hidden = pasting;
+  $('importPart').hidden = !pasting;
   $('addTitle').textContent = pasting ? 'Paste invite links' : 'Add a room';
+}
+function openAdd(pasting) {
+  addMode(!!pasting);
   $('addName').value = '';
   $('addKey').value = newPassword();
   $('addErr').textContent = '';
   $('importText').value = '';
   $('importErr').textContent = '';
-  $('pasteBtn').hidden = !(navigator.clipboard && navigator.clipboard.readText);
+  const canRead = !!(navigator.clipboard && navigator.clipboard.readText);
+  $('pasteBtn').parentElement.hidden = !canRead;
+  $('importLabel').textContent = canRead ? 'Or paste them here' : 'Paste them here';
+  showFound();
   push('add');
 }
+$('toPaste').addEventListener('click', () => { addMode(true); $('importErr').textContent = ''; showFound(); });
+
+// As soon as there is text in the box: which rooms it holds, and one clear button to add them.
+function showFound() {
+  const found = roomsFromText($('importText').value);
+  const fresh = found.filter(r => !data.rooms.some(x => sameRoom(x, r)));
+  const btn = $('importBtn');
+  const box = $('importFound');
+  box.replaceChildren();
+  if (found.length) {
+    box.append(el('span', '', `Found ${found.length} room${found.length === 1 ? '' : 's'}: `));
+    found.forEach((r, i) => {
+      const had = !fresh.includes(r);
+      box.append(el('span', had ? 'have' : '', shownName(r) + (had ? ' (already here)' : '') + (i < found.length - 1 ? ', ' : '')));
+    });
+  } else if ($('importText').value.trim()) {
+    box.append(el('span', '', 'No invite links in this text yet. They look like …#room=family&key=…'));
+  }
+  btn.disabled = !fresh.length;
+  btn.classList.toggle('primary', fresh.length > 0);
+  $('pasteBtn').classList.toggle('primary', !fresh.length);   // one black button at a time
+  btn.textContent = fresh.length ? `Add ${fresh.length} room${fresh.length === 1 ? '' : 's'}`
+    : found.length ? 'You already have these' : 'Add rooms';
+  return { found, fresh };
+}
+$('importText').addEventListener('input', () => { $('importErr').textContent = ''; showFound(); });
 
 function importRooms() {
-  const found = roomsFromText($('importText').value);
-  if (!found.length) {
-    $('importErr').textContent = $('importText').value.trim()
-      ? 'No invite links found. They look like …#room=family&key=…'
-      : 'Paste one or more invite links first.';
-    return;
-  }
-  const fresh = found.filter(r => !data.rooms.some(x => sameRoom(x, r)));
+  const { found, fresh } = showFound();
+  if (!fresh.length) return false;
   for (const r of fresh) addRoom(r);
   const had = found.length - fresh.length;
-  pendingToast = fresh.length
-    ? `Added ${fresh.length} room${fresh.length === 1 ? '' : 's'}` + (had ? ` (${had} you already had)` : '')
-    : (had === 1 ? 'You already had this room' : 'You already had these rooms');
+  pendingToast = `Added ${fresh.length} room${fresh.length === 1 ? '' : 's'}` + (had ? ` (${had} you already had)` : '');
   back();
+  return true;
 }
 $('importBtn').addEventListener('click', importRooms);
+
+// The main button: read the clipboard and add what's in it, in one tap.
 $('pasteBtn').addEventListener('click', async () => {
-  try {
-    const text = await navigator.clipboard.readText();
-    if (text) { $('importText').value = text; importRooms(); return; }
-  } catch {}
-  $('importErr').textContent = 'Could not read the clipboard. Press and hold in the box above, then Paste.';
-  $('importText').focus();
+  $('importErr').textContent = '';
+  let text = '';
+  try { text = await navigator.clipboard.readText(); }
+  catch {
+    $('importErr').textContent = 'Couldn\'t read the clipboard. Press and hold in the box below, then tap Paste.';
+    $('importText').focus();
+    return;
+  }
+  $('importText').value = text || '';
+  const { found } = showFound();
+  if (importRooms()) return;
+  $('importErr').textContent = found.length ? 'You already have all of these rooms.'
+    : 'Your clipboard has no invite links. Copy them first (in the other browser: Edit, Copy all rooms).';
 });
 $('genBtn').addEventListener('click', () => { $('addKey').value = newPassword(); });
 $('addName').addEventListener('keydown', e => { if (e.key === 'Enter') $('addKey').focus(); });
