@@ -3,6 +3,17 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.6.3
+
+Two causes of black video and missing sound, found in the code and fixed at the source:
+
+- The connection library could skip the update that offers your camera and microphone to
+  someone, when it came in while the previous update was still finishing. Your own app now
+  checks that everything it sends was really offered, and offers it again if not.
+- Video could arrive and be decoded while the screen stayed black (Safari can do this when
+  a camera is added to a stream it is already showing). The app now counts the frames each
+  tile actually shows, and points the tile at the video again when they stop.
+
 ## v1.6.2
 
 Fixes for black video and missing sound:
