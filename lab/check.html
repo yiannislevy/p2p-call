@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; media-src 'self' blob: mediastream:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="check.css">
+<script type="module" src="check.js"></script>
+<title>Call check</title>
+</head>
+<body>
+<main>
+  <h1>Call check</h1>
+  <p class="lead">A one-minute test that shows how video calls can work on your phone and network. When you're done, copy the results and send them to whoever sent you this link.</p>
+
+  <section class="about">
+    <label class="row"><span>Your name <span class="opt">(optional)</span></span>
+      <input id="who" type="text" maxlength="40" autocomplete="off" placeholder="So they know whose results these are">
+    </label>
+    <p class="row-label">Right now you are on</p>
+    <div class="choices" id="netChoice">
+      <button class="chip" type="button" data-net="mobile data">Mobile data</button>
+      <button class="chip" type="button" data-net="wifi">Wifi</button>
+      <button class="chip" type="button" data-net="not sure">Not sure</button>
+    </div>
+    <label class="row"><span>Carrier or internet provider <span class="opt">(optional)</span></span>
+      <input id="carrier" type="text" maxlength="40" autocomplete="off" placeholder="Optional">
+    </label>
+  </section>
+
+  <section>
+    <h2>1. Network</h2>
+    <p class="hint">Asks a few public address helpers (Google, Cloudflare) which internet address and port your network gives you, the same thing every video call does. Takes about five seconds. Try it once on mobile data and once on wifi if you can.</p>
+    <button class="btn primary" id="net" type="button">Test the network</button>
+    <p class="result" id="netResult"></p>
+  </section>
+
+  <section>
+    <h2>2. Camera and microphone</h2>
+    <p class="hint">Starts your camera and sends it through a call connection inside this page. Nothing leaves your phone.</p>
+    <button class="btn" id="start" type="button">Start the camera</button>
+    <div class="videos">
+      <video id="local" class="mirror" autoplay playsinline muted></video>
+      <video id="remote" autoplay playsinline muted></video>
+    </div>
+    <p class="result" id="startResult"></p>
+  </section>
+
+  <details>
+    <summary>More checks for iPhone</summary>
+
+    <section>
+      <h2>3. Floating video</h2>
+      <p class="hint">Floats the call video in a small window, like FaceTime.</p>
+      <button class="btn" id="pip" type="button" disabled>Float the video</button>
+      <p class="result" id="pipResult"></p>
+    </section>
+
+    <section>
+      <h2>4. Another app</h2>
+      <p class="hint">Close the floating video first. Tap Start, switch to another app for about 20 seconds while talking, then come back here.</p>
+      <button class="btn" id="bg" type="button" disabled>Start</button>
+      <p class="result" id="bgResult"></p>
+    </section>
+
+    <section>
+      <h2>5. Switching while floating</h2>
+      <p class="hint">The floating window switches every 3 seconds between you and a coloured card, as if someone else started talking. Tap, go to another app, watch it for about 15 seconds, then come back.</p>
+      <video id="sw" muted autoplay playsinline class="tiny"></video>
+      <button class="btn" id="swB" type="button" disabled>Float and switch</button>
+      <p class="result" id="swResult"></p>
+    </section>
+  </details>
+
+  <section>
+    <h2>Results</h2>
+    <p class="hint">Nothing is saved or sent anywhere by this page. Copy the results and send them yourself.</p>
+    <div class="actions">
+      <button class="btn primary" id="copy" type="button">Copy results</button>
+      <button class="btn" id="share" type="button" hidden>Share…</button>
+    </div>
+    <pre id="report"></pre>
+  </section>
+</main>
+</body>
+</html>
