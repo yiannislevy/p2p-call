@@ -1,140 +1,56 @@
 # Call
 
-Private video calls for family and friends, straight from browser to browser.
-No accounts, no app store, no server in between. Video and audio are encrypted end to end.
-
-**Live:** https://yiannislevy.github.io/p2p-call/
-
-This is a personal project. It is public so the
-code can be read and checked, not for reuse (see [License](#license)).
-
-## Try it
-
-You need two devices, or a friend.
-
-1. Open the site, tap **Add a room**, give it any name, keep the generated password, **Save room**.
-2. Tap the share icon next to the room. The invite link is copied; send it to the other device.
-3. Both sides open the room, type a name and tap **Join call**.
-
-Rooms are private: without the exact name and password nobody can find or join them,
-so trying it out never puts you in someone else's call.
-
-On iPhone, open it in Safari, then Share, then **Add to Home Screen** to use it like an app.
+Private video calls that go straight from one browser to another. No accounts, no app to
+install, no server in the middle. Video and sound are encrypted end to end.
 
 ## How it works
 
 ```
-   your phone                                        their phone
+   phone A                                            phone B
   ┌──────────┐   1. "anyone in room a91f3c…?"   ┌──────────┐
   │          │ ──────► public relays ◄───────── │          │
   │   Call   │       (encrypted handshake)      │   Call   │
   │          │                                  │          │
   │          │ ◄══════════════════════════════► │          │
-  └──────────┘   2. video + audio, direct,      └──────────┘
+  └──────────┘   2. video + sound, direct,      └──────────┘
                     encrypted end to end
 ```
 
-1. **Finding each other.** The room name and password are turned into a random-looking
-   meeting point on the device (PBKDF2-SHA256, 300,000 rounds). Both phones announce
-   themselves there through a few public Nostr relays. The handshake they exchange is
-   encrypted with the room password (AES-256-GCM), so the relays see only noise.
-2. **Talking.** The browsers then connect directly with WebRTC. Video and audio flow
-   between the devices only, encrypted with DTLS-SRTP, which browsers do not allow
-   to be switched off. Nothing passes through, or is stored on, any server.
-
-3. **Who is in.** While someone is in a call, their phone posts a small "here" note every
-   25 seconds (and "bye" when leaving) through the same relays, on a second channel derived
-   from the room password and encrypted with it. The rooms screen asks "anyone here?" and
-   shows the answers as initials with a blue dot. Relays see only scrambled notes; only
-   people with the room's link can read who is in.
-
-The site itself is a handful of static files on GitHub Pages. GitHub only hands out the
-page; it never sees a call.
-
-## Privacy and security
-
-- The room name and password never leave the device in readable form.
-- Invite links carry the password after the `#`, a part of the address that browsers never
-  send to any server. The app removes it from the address bar as soon as it is read.
-- No accounts, no tracking, no analytics, nothing loaded from other websites. The one
-  library ([Trystero](https://github.com/dmotz/trystero) 0.27.0, MIT) is copied into
-  `vendor/` and pinned.
-- A strict Content Security Policy blocks injected scripts, and the page refuses to run
-  inside other websites' frames.
-- Names and room names are always shown as plain text.
-- "Who is in" notes are encrypted with the room password and signed with a throwaway key
-  per session, so they cannot be read or linked to a person by the relays.
-- Rooms and your name are stored only on your device; "Forget all rooms" removes them. Each
-  browser keeps its own rooms (Safari and the home screen app too): Edit, Copy all rooms, then
-  Paste invite links in the other one moves them.
-- Kept out of search engines.
-
-What to know:
-
-- **The invite link is the key.** Anyone holding it can join that room. If it leaks,
-  make a new room and send the new link.
-- **People in a call can see each other's IP address**, as with any direct connection.
+- **A room is a name and a password.** Both are turned on the device into a meeting point
+  that looks random (PBKDF2-SHA256, 300,000 rounds). Nobody can find a room, or tell that
+  it exists, without both.
+- **Finding each other.** Phones announce themselves at that meeting point through a few
+  public Nostr relays. What they exchange is encrypted with the room password
+  (AES-256-GCM), so the relays carry only noise.
+- **Talking.** The browsers then connect directly over WebRTC. Video and sound travel
+  between the devices only, encrypted with DTLS-SRTP, and are never stored anywhere.
+- **Who is in.** While someone is in a call, their phone posts a small encrypted "here"
+  note to the same relays, signed with a throwaway key. The rooms screen shows who is in
+  a call before you join, readable only with the room's password.
+- **Staying up.** Connections that drop (wifi to mobile data, a tunnel) reconnect on their
+  own. Video or sound that stops arriving is sent again, and a camera that stops is
+  replaced. If two people in a group can't reach each other, someone connected to both
+  passes their video along. That is still a person in the call, not a server.
+- **Sound and picture.** Up to 1080p in a 1-on-1, shared fairly in groups, and voice
+  with redundancy so a lost packet doesn't cut a word.
+- **The site** is a few static files with no build framework, covered by browser tests
+  that run before anything goes live.
 
 ## Limits
 
-- Up to 6 people per call; 2 to 4 is the sweet spot, since each phone sends its video to every other phone.
-- Quality: 1080p at up to 4 Mbps in a 1-on-1, 720p in groups of 3-4, 540p for 5-6, and 64 kbps
-  voice. The browser lowers this on its own when a connection is weak. Tap the people count in a
-  call to see what is actually arriving.
-- A direct connection is needed. It works on almost all home networks and most mobile
-  data, but some office, hotel or public wifi blocks it. The app tells you when your
-  network blocks calls and which side to switch to mobile data or another wifi. In a group,
-  two people who can't connect to each other are passed along by someone connected to both
-  (their phone forwards the video; still no server).
-- There is no ringing or notifications: people join when they open the room. The rooms
-  screen shows who is already in.
-- Dropped connections (switching wifi to mobile data, a tunnel) reconnect on their own; the
-  others see "Reconnecting…" rather than you leaving.
-- On iPhone, Float puts the person talking in a small window over other apps. While you are
-  in another app you stay heard and keep hearing everyone; iPhones pause your own camera
-  then, and the others see "In another app".
-
-## Development
-
-Everything runs as static files; there is no build framework.
-
-| File | What it is |
-| --- | --- |
-| `index.html`, `style.css`, `app.js` | The app |
-| `presence.js` | Who is in each room, over encrypted relay notes |
-| `vendor/` | Pinned copies of Trystero (connections) and its signing library |
-| `scripts/build.mjs` | Builds the deployable site, ties every file to its version |
-| `tests/` | Browser tests with fake cameras and a local relay |
-| `.github/workflows/` | Test, deploy and rollback |
-
-```sh
-npm ci
-npx playwright install chromium
-npm test          # builds, starts a local relay, runs every test
-```
-
-**Tests** cover a three-person call (video, names, mute and camera state, leaving and
-the back gesture), invite links, a wrong password never meeting the room, names and room
-names never running as code, reconnecting after a dropped connection (two and three people,
-without duplicate tiles or false "left" messages, and removing someone who never comes back),
-swapping views and keyboard shortcuts (and that they stay out of the way while typing),
-video or sound that never arrives (sent again automatically), a camera that stops on its own,
-someone in another app, leaving and rejoining straight away, refreshing before and during a call, picking up people who
-were missed, naming people who can't connect without endless retries, who is talking (and never a muted person), quality settings per group size (and kept after flipping the camera), who-is-in showing and clearing live (and staying unreadable
-to the relays and invisible to other passwords), the app only talking to its own site and the relays,
-refusing to run inside a frame, and the new version still calling the previous release.
-
-**Releases.** Every change to the app raises `VERSION` in `app.js` and adds a section to
-`CHANGELOG.md` (a pull request without both fails). Pull requests run all tests; merging
-to `main` runs them again, publishes the site only if they pass, and tags the release.
-The version is shown at the bottom of the rooms screen.
-
-**Rollback.** Actions tab, then **Deploy a version (rollback)**, then **Run workflow**,
-then type a release such as `v1.0.0`. It is live again within a minute; the next merge
-to `main` deploys `main` again.
+- Up to 6 people per call. Every phone sends its video to every other phone, so 2 to 4
+  works best.
+- A direct connection is needed. It works on most home networks and most mobile data,
+  but some office, hotel and public wifi block it, as do some pairs of mobile networks.
+  The app says when that happens. In a group, the people who can't reach each other are
+  passed along by someone who can reach both.
+- People in a call can see each other's IP address, as with any direct connection.
+- There is no ringing: people join when they open the room.
+- iPhones pause the camera while you are in another app. You stay heard, and the video
+  can float in a small window.
 
 ## License
 
-Copyright (c) 2026 yiannislevy. All rights reserved. The source is visible for reading
-only; no permission is granted to use, copy, modify or redistribute it. See [LICENSE](LICENSE).
-Third-party code in `vendor/` keeps its MIT license.
+All rights reserved. The code is here to be read, not reused: no permission is given to
+copy, modify or redistribute it. See [LICENSE](LICENSE). Third-party code in `vendor/`
+keeps its own MIT license.
