@@ -3,6 +3,20 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.10.0
+
+- **Port knocking for strict mobile carriers.** Some carriers give a phone a new public port
+  for every destination, so a home router drops its packets. They usually hand each phone a
+  small block of ports, though. If a connection hasn't come up after 2.5 seconds, the app now
+  also checks the ports around the one the other side reported (up to 128 small checks,
+  once), which lets the phone's packets through from whichever port it got. Calls that
+  connect normally send nothing extra.
+- **No more false "your network blocks calls".** The network check now says blocked only
+  when it really finished without finding a public address, not when a slow mobile
+  connection ran out of time.
+- **Opened inside Messenger, Facebook or Instagram?** The room now says to open it in
+  Safari or Chrome, which handle calls better than those apps' built-in browsers.
+
 ## v1.9.3
 
 - **Fewer "Reconnecting…" loops on mobile.** When a connection briefly reports

@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.9.3';
+const VERSION = '1.10.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -467,6 +467,60 @@ if (VOICE_CODECS && window.RTCPeerConnection && RTCRtpTransceiver.prototype.setC
     return sender;
   };
 }
+/* Knocking on a port block. Some mobile carriers give each phone a new public port for every
+   destination, so the port a phone reports is not the one it will use towards us, and a home
+   router drops packets from ports it hasn't sent to. But carriers usually hand each phone a
+   small block of ports (about 64). So if a connection hasn't come up after a moment, we also
+   check the ports around the one reported: that opens our router for all of them, and the
+   phone's packets get through from whichever port it was given. A few dozen tiny checks,
+   once, and only when the normal way didn't work. */
+const KNOCK_AFTER_MS = 2500;
+const KNOCK_SPAN = 40;            // ports either side of the reported ones
+const KNOCK_MAX = 128;            // at most this many extra checks per connection
+if (window.RTCPeerConnection) {
+  const addIce = RTCPeerConnection.prototype.addIceCandidate;
+  RTCPeerConnection.prototype.addIceCandidate = function (cand, ...rest) {
+    const done = addIce.call(this, cand, ...rest);
+    try { noteMapped(this, cand, addIce); } catch {}
+    return done;
+  };
+}
+function noteMapped(pc, cand, addIce) {
+  const line = cand && (typeof cand === 'string' ? cand : cand.candidate);
+  if (!line) return;
+  const f = line.replace(/^a=/, '').split(' ');
+  // candidate:<foundation> <component> <protocol> <priority> <address> <port> typ <type> ...
+  if (f.length < 8 || String(f[2]).toLowerCase() !== 'udp' || f[7] !== 'srflx' || f[1] !== '1') return;
+  const ip = f[4], port = Number(f[5]);
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) || !(port > 0 && port < 65536)) return;
+  const k = pc.__knock || (pc.__knock = { seen: new Map(), done: new Set(), timer: 0, tries: 0 });
+  const t = k.seen.get(ip) || { ports: new Set(), cand };
+  t.ports.add(port);
+  k.seen.set(ip, t);
+  if (!k.timer) k.timer = setTimeout(() => knock(pc, addIce), KNOCK_AFTER_MS);
+}
+function knock(pc, addIce) {
+  const k = pc.__knock;
+  k.timer = 0;
+  if (['connected', 'completed', 'closed'].includes(pc.iceConnectionState) || pc.signalingState === 'closed') return;
+  if (!pc.remoteDescription) { if (++k.tries < 5) k.timer = setTimeout(() => knock(pc, addIce), 1000); return; }
+  let added = 0;
+  for (const [ip, t] of k.seen) {
+    const ports = [...t.ports];
+    const lo = Math.max(1024, Math.min(...ports) - KNOCK_SPAN), hi = Math.min(65535, Math.max(...ports) + KNOCK_SPAN);
+    for (let p = lo; p <= hi && k.done.size < KNOCK_MAX; p++) {
+      if (t.ports.has(p) || k.done.has(ip + ':' + p)) continue;
+      k.done.add(ip + ':' + p);
+      added++;
+      addIce.call(pc, {
+        candidate: `candidate:k${p} 1 udp ${100 + (p % 50)} ${ip} ${p} typ srflx raddr 0.0.0.0 rport 0`,
+        sdpMid: t.cand.sdpMid, sdpMLineIndex: t.cand.sdpMLineIndex, usernameFragment: t.cand.usernameFragment
+      }).catch(() => {});
+    }
+    if (added) log('KNOCK', added, `ports around ${Math.min(...ports)}-${Math.max(...ports)}`, '(link not up yet)');
+  }
+}
+
 const videoConstraints = f => ({ facingMode: f, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } });
 
 async function startMedia() {
@@ -630,8 +684,21 @@ function recallActive() {
 }
 
 // resume: a call we were in before a refresh; rejoin it straight away.
+// Links opened inside Messenger, Facebook, Instagram and the like open in that app's own
+// browser, which handles calls worse than Safari or Chrome.
+const IN_APP = (() => {
+  const ua = navigator.userAgent;
+  if (/FBAN|FBAV|FB_IAB|FBIOS|Messenger/i.test(ua)) return 'Messenger or Facebook';
+  if (/Instagram/i.test(ua)) return 'Instagram';
+  if (/\bLine\//i.test(ua)) return 'LINE';
+  if (/Snapchat|TikTok|musical_ly|BytedanceWebview/i.test(ua)) return 'this app';
+  return '';
+})();
+
 function openLobby(r, invited, resume) {
   lobbyRoom = { name: r.name, key: r.key, invited };
+  $('appWarn').hidden = !IN_APP;
+  $('appWarn').textContent = IN_APP ? `You opened this inside ${IN_APP}. Calls work better in Safari or Chrome: tap the ⋯ menu and choose Open in browser.` : '';
   const saved = data.rooms.find(x => sameRoom(x, r));
   $('lobbyTitle').textContent = saved ? shownName(saved) : r.name;
   $('lobbyWho').hidden = true;
@@ -1829,12 +1896,13 @@ function checkNetwork(force) {
 async function probe() {
   let pc;
   try {
-    pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] });
+    pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] });
     pc.createDataChannel('probe');
     const found = [];
+    let finished = false;
     const done = new Promise(res => {
-      const t = setTimeout(res, 4000);
-      pc.onicecandidate = e => { if (!e.candidate) { clearTimeout(t); res(); } else found.push(e.candidate); };
+      const t = setTimeout(res, 6000);
+      pc.onicecandidate = e => { if (!e.candidate) { finished = true; clearTimeout(t); res(); } else found.push(e.candidate); };
     });
     await pc.setLocalDescription(await pc.createOffer());
     await done;
@@ -1844,7 +1912,9 @@ async function probe() {
       return addr.includes(':') && !/^(fe80|fc|fd)/i.test(addr);
     });
     const mapped = found.filter(c => (c.type || (c.candidate.match(/ typ (\w+)/) || [])[1]) === 'srflx');
-    if (!mapped.length) return 'blocked';
+    // No public address: blocked only if the check really finished (a slow mobile connection
+    // can simply run out of time, which says nothing about the network).
+    if (!mapped.length) return finished ? 'blocked' : '';
     const ports = {};
     for (const c of mapped) {
       const addr = c.address || c.candidate.split(' ')[4];
