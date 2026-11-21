@@ -3,6 +3,18 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.9.3
+
+- **Fewer "Reconnecting…" loops on mobile.** When a connection briefly reports
+  "disconnected" (common on mobile networks: a signal dip, a handover), the connection
+  library closed it after 5 seconds, and the app rebuilt everything after 12. Browsers
+  usually recover from these dropouts by themselves, so both now wait: the library closes a
+  wobbling connection after 25 seconds, and the app counts it as down only after 20.
+- **Connection log.** "Copy connection log" in the connection details copies a timeline of
+  every connection (states, how it is connected, round-trip time) and of every reason the
+  app reconnected, to send when calls misbehave. It holds no addresses or passwords and is
+  kept only in memory.
+
 ## v1.9.2
 
 Paste invite links, clearer:

@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.9.2';
+const VERSION = '1.9.3';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -308,6 +308,21 @@ function editRow(r, i) {
 }
 
 $('editBtn').addEventListener('click', () => { editing = !editing; renderHome(); });
+function logText() {
+  const head = [
+    `Call ${VERSION} · ${navigator.userAgent}`,
+    `Network: ${netType || 'unknown'}${netV6 ? ', IPv6' : ''} · in call: ${inCall ? 'yes' : 'no'} · people: ${people.size} · rejoins: ${rejoins}`,
+    `Now: ${[...people.values()].map(p => `${who(p)} ${p.reconnecting ? 'reconnecting' : p.relayVia ? 'passed along' : p.peerId ? 'linked' : 'no link'}`).join('; ') || 'nobody'}`,
+    `Since start: ${Math.round((Date.now() - logStart) / 1000)} s`,
+    ''
+  ];
+  return head.concat(connLog).join('\n');
+}
+$('copyLog').addEventListener('click', async () => {
+  if (await copyText(logText())) toast('Connection log copied. Paste it to whoever asked for it.', 4000);
+  else toast('Copying was refused. Try again.', 4000);
+});
+
 $('copyAllBtn').addEventListener('click', async () => {
   const text = exportText();
   const n = data.rooms.length;
@@ -685,7 +700,21 @@ let roomMembers = [];            // [{ name, cs }] from those notes
 const unseen = new Map();        // call session -> { name, since, tries, told }: in the room, not connected to us
 const UNSEEN_MS = 15000;         // in the room but not connected this long: try to pick them up
 const MAX_TRIES = 2;
-const TEST_HOOKS = 0;            // test builds only: lets tests block a direct connection between two people             // rejoins per such person, so a network that can't connect never makes us flap
+const TEST_HOOKS = 0;
+
+/* Connection log: what happened to each connection, and why the app reconnected, kept in
+   memory only (gone when the page closes) for "Copy connection log" in the details. No
+   addresses or keys in it: only states, candidate types, names and reasons. */
+const LOG_MAX = 500;
+const connLog = [];
+const logStart = Date.now();
+function log(...parts) {
+  const d = new Date();
+  const ts = d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  connLog.push(ts + ' ' + parts.join(' '));
+  if (connLog.length > LOG_MAX) connLog.splice(0, connLog.length - LOG_MAX);
+}
+const who = p => p ? `${p.name || '?'}[${(p.sess || p.key || '').slice(-6)}]` : '?';            // test builds only: lets tests block a direct connection between two people             // rejoins per such person, so a network that can't connect never makes us flap
 const people = new Map();        // session id (or 'peer:<id>' for older versions) -> person
 const byPeer = new Map();        // connection (peer id) -> person
 
@@ -726,6 +755,7 @@ function joinCallRoom() {
     relayConfig: { urls: RELAYS, redundancy: RELAYS.length, warnOnRelayFailure: false }
   }, callId);
   room = me;
+  log('JOIN call room', 'as', mySession.slice(-6), `(${VERSION}, network ${netType || 'unchecked'})`);
   const live = () => room === me && inCall;   // ignore late events from a room we already left
   stateAction = me.makeAction('st');
   stateAction.onReceive(ctx => ctx.byteLength <= 512);
@@ -794,7 +824,9 @@ addEventListener('pagehide', () => {
   try { stateAction && stateAction.send({ n: data.name, m: micOn, c: camOn, s: mySession, away: true }).catch(() => {}); } catch {}
   try { room && room.leave(); } catch {}
 });
-addEventListener('online', () => { if (inCall) { rejoinAt = 0; if (people.size) downSince = Date.now() - DOWN_MS; checkHealth(); } });
+addEventListener('offline', () => log('NETWORK offline'));
+document.addEventListener('visibilitychange', () => { if (inCall) log('APP', document.visibilityState === 'hidden' ? 'in another app' : 'back'); });
+addEventListener('online', () => { log('NETWORK online'); if (inCall) { rejoinAt = 0; if (people.size) downSince = Date.now() - DOWN_MS; checkHealth(); } });
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && inCall && !wakeLock) {
     try { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } catch {}
@@ -839,6 +871,7 @@ function removePerson(p, quietly) {
 
 function markReconnecting(p) {
   if (p.reconnecting) return;   // keep the original deadline
+  log('RECONNECTING', who(p), p.away ? '(said: refreshing)' : '');
   p.reconnecting = true;
   p.since = Date.now();
   renderTile(p);
@@ -846,16 +879,17 @@ function markReconnecting(p) {
   // Still announcing in the room after a while, but our link to them is gone: repair it.
   // Exactly one side does this (the lower session id), so the two don't keep crossing.
   p.repair = setTimeout(() => {
-    if (p.reconnecting && people.get(p.key) === p && aliveInCall.has(p.sess) && mySession < p.sess) rejoin(true);
+    if (p.reconnecting && people.get(p.key) === p && aliveInCall.has(p.sess) && mySession < p.sess) rejoin(true, 'link to ' + who(p) + ' did not come back');
   }, REPAIR_MS);
   const decide = () => {
     if (!p.reconnecting || people.get(p.key) !== p) return;
     // Their phone still says "here": keep waiting (and keep repairing), up to a limit.
     if (aliveInCall.has(p.sess) && Date.now() - p.since < MAX_WAIT_MS) {
-      if (mySession < p.sess && !rejoining && (p.repairs || 0) < MAX_TRIES) { p.repairs = (p.repairs || 0) + 1; rejoin(true); }
+      if (mySession < p.sess && !rejoining && (p.repairs || 0) < MAX_TRIES) { p.repairs = (p.repairs || 0) + 1; rejoin(true, 'still no link to ' + who(p)); }
       p.grace = setTimeout(decide, RECHECK_MS);
       return;
     }
+    log('GAVE UP on', who(p), aliveInCall.has(p.sess) ? '(waited too long)' : '(no longer in the room)');
     removePerson(p, false);
   };
   p.grace = setTimeout(decide, p.away ? AWAY_GRACE_MS : GRACE_MS);
@@ -882,6 +916,7 @@ function onPeerJoin(peerId) {
   const p = newPerson('peer:' + peerId);
   p.peerId = peerId;
   p.linkedAt = Date.now();
+  log('LINK UP', 'peer', peerId.slice(0, 6));
   byPeer.set(peerId, p);
   if (local) room.addStream(local, { target: peerId }).catch(() => {});
   sendState(peerId);
@@ -893,6 +928,7 @@ function onPeerJoin(peerId) {
 function onPeerLeave(peerId) {
   relayerGone(peerId);
   const p = byPeer.get(peerId);
+  log('LINK DOWN', p ? who(p) : 'peer ' + peerId.slice(0, 6), p && p.leaving ? '(said bye)' : '', lastState.get(peerId) || '');
   byPeer.delete(peerId);
   if (p && p.sess) endRelaysOf(p.sess);
   if (!p || p.peerId !== peerId) return;   // already back on a newer connection
@@ -920,6 +956,7 @@ function onPeerState(peerId, msg) {
       // The same person on a new connection: keep their tile, drop the temporary one.
       if (known.peerId && known.peerId !== peerId) byPeer.delete(known.peerId);
       if (known.relayVia) stopRelay(known);   // a direct connection now: no need to pass it along
+      log('BACK', who(known), 'on a new link', known.reconnecting ? `after ${Math.round((Date.now() - known.since) / 1000)} s` : '');
       known.peerId = peerId;
       known.linkedAt = Date.now();
       known.rx = null; known.starvedSince = 0; known.asks = 0;
@@ -1021,6 +1058,7 @@ function checkShown(p, decoding, now) {
   if (++p.shownStuck < SHOWN_STUCK_CHECKS || now - (p.reattachedAt || 0) < 10000) return;
   p.shownStuck = 0;
   p.reattachedAt = now;
+  log('REDRAW', who(p), '(video arriving but not shown)');
   reattach(v, p.stream);
 }
 
@@ -1041,6 +1079,7 @@ function checkOffered() {
     pc.__pendingSince = pc.__pendingSince || now;
     if (now - pc.__pendingSince < UNOFFERED_MS || now - (pc.__offeredAt || 0) < UNOFFERED_MS) continue;
     pc.__offeredAt = now;
+    log('RE-OFFER our media (an update was skipped)');
     try { pc.onnegotiationneeded && pc.onnegotiationneeded(new Event('negotiationneeded')); } catch {}
   }
 }
@@ -1048,6 +1087,7 @@ function checkOffered() {
 // Someone isn't getting our camera or microphone: send them again, to that person only.
 const lastResend = new Map();
 async function resendTo(peerId) {
+  log('RESEND our media to', who(byPeer.get(peerId)), '(they asked)');
   if (!room || !local) return;
   if (Date.now() - (lastResend.get(peerId) || 0) < 5000) return;
   lastResend.set(peerId, Date.now());
@@ -1059,14 +1099,62 @@ async function resendTo(peerId) {
 // Our own connection. The connection library repairs a single broken link by itself within
 // a few seconds. If every link stays dead longer than that (switched wifi to mobile data,
 // lost signal for a while), quietly join the room again from scratch.
+// "disconnected" is often a short dropout on mobile networks that the browser recovers from
+// by itself; it only counts as down once it has lasted WOBBLE_MS (the connection library
+// waits 25 s too, and browsers declare a dead link failed after about 30 s).
+const WOBBLE_MS = 20000;
+const wobblingSince = new Map();
 function linkStates() {
   let all = {};
   try { all = room ? room.getPeers() : {}; } catch {}
-  return [...byPeer.keys()].map(id => { const pc = all[id] && all[id].connection; return pc ? pc.connectionState : 'gone'; });
+  const now = Date.now();
+  return [...byPeer.keys()].map(id => {
+    const pc = all[id] && all[id].connection;
+    if (!pc) return 'gone';
+    const st = pc.connectionState;
+    if (st !== 'disconnected' && pc.iceConnectionState !== 'disconnected') { wobblingSince.delete(id); return st; }
+    if (!wobblingSince.has(id)) wobblingSince.set(id, now);
+    return now - wobblingSince.get(id) >= WOBBLE_MS ? 'disconnected' : 'wobbling';
+  });
+}
+
+// Every connection's states as they change, and how it is connected once it is.
+const lastState = new Map();
+function watchLinks() {
+  let all = {};
+  try { all = room ? room.getPeers() : {}; } catch {}
+  for (const [id, info] of Object.entries(all)) {
+    const pc = info && info.connection;
+    if (!pc) continue;
+    if (!pc.__watched) {
+      pc.__watched = true;
+      for (const ev of ['connectionstatechange', 'iceconnectionstatechange', 'signalingstatechange']) pc.addEventListener(ev, () => { if (inCall) watchLinks(); });
+    }
+    const st = `${pc.connectionState}/${pc.iceConnectionState}/${pc.signalingState}`;
+    if (lastState.get(id) === st) continue;
+    const before = lastState.get(id);
+    lastState.set(id, st);
+    log('STATE', who(byPeer.get(id)) === '?' ? 'peer ' + id.slice(0, 6) : who(byPeer.get(id)), before ? before + ' -> ' + st : st);
+    if (pc.connectionState === 'connected') describeLink(id, pc);
+  }
+  for (const id of [...lastState.keys()]) if (!all[id]) lastState.delete(id);
+}
+async function describeLink(id, pc) {
+  try {
+    const stats = await pc.getStats();
+    let pair = null;
+    stats.forEach(s => { if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId); });
+    if (!pair) stats.forEach(s => { if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = pair || s; });
+    if (!pair) return;
+    const l = stats.get(pair.localCandidateId) || {}, r = stats.get(pair.remoteCandidateId) || {};
+    const rtt = pair.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) + ' ms' : '?';
+    log('PATH', who(byPeer.get(id)), `${l.candidateType || '?'}/${l.protocol || '?'}${l.networkType ? '/' + l.networkType : ''} -> ${r.candidateType || '?'}/${r.protocol || '?'}`, 'rtt', rtt);
+  } catch {}
 }
 
 function checkHealth() {
   if (!inCall || !room || rejoining) return;
+  watchLinks();
   watchMedia();
   checkOffered();
   recoverLocalTracks(false);
@@ -1084,13 +1172,14 @@ function checkHealth() {
   }
   if (!allDown) { downSince = 0; return; }
   if (!downSince) downSince = Date.now();
-  if (Date.now() - downSince >= DOWN_MS && Date.now() >= rejoinAt) rejoin();
+  if (Date.now() - downSince >= DOWN_MS && Date.now() >= rejoinAt) rejoin(false, 'links: ' + states.join(','));
 }
 
 // repairing: we are fine, but a link to someone still in the room could not come back.
-async function rejoin(repairing) {
+async function rejoin(repairing, why = '') {
   if (!inCall || rejoining) return;
   if (repairing && Date.now() < rejoinAt) return;
+  log('REJOIN', repairing ? '(repair)' : '(all links down)', why, `#${rejoins + 1}`);
   rejoining = true;
   rejoins++;
   if (!repairing && !selfReconnecting) { selfReconnecting = true; toast('Connection lost. Reconnecting…', 4000); }
@@ -1204,6 +1293,7 @@ function checkUnseen() {
     // Still not connected after a while: say so once (retries may still pick them up).
     if (!u.told && now - u.first >= UNSEEN_MS * 2) {
       u.told = true;
+      log('CANNOT CONNECT to', name, '-', netType || 'network unknown');
       toast(`${name} is in the room but can't connect to you. ${failureReason()}`, 8000);
       renderDetails();
     }
@@ -1212,7 +1302,7 @@ function checkUnseen() {
     if (u.tries < MAX_TRIES && now >= rejoinAt) {
       u.tries++;
       u.since = now;
-      rejoin(true);
+      rejoin(true, `${name} in the room but not connected (try ${u.tries})`);
       return;
     }
   }
@@ -1388,6 +1478,7 @@ function blockPeer(peerId) {
 }
 
 function onRoomError(err) {
+  log('ROOM ERROR', String((err && (err.error || err.message)) || err).slice(0, 120));
   if (!inCall || !err) return;
   if (err.code === 'room-full' && people.size === 0) {
     toast(`This room is full (${MAX_PEOPLE} people at most)`);

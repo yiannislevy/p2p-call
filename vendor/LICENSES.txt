@@ -1,4 +1,4 @@
-Trystero 0.27.0 (MIT) and its dependency @noble/secp256k1 (MIT), bundled unmodified.
+Trystero 0.27.0 (MIT) and its dependency @noble/secp256k1 (MIT), bundled (one local change, noted at the end).
 
 Copyright (c) 2021 Dan Motzenbecker
 
@@ -45,3 +45,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+Local change to trystero-0.27.0.js: a connection that reports "disconnected" is closed after
+25 s instead of 5 s (the constant passed to its disconnected-grace timer), so the short
+dropouts common on mobile networks can recover instead of tearing the connection down.
