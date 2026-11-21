@@ -119,3 +119,42 @@ test('voice is sent with redundancy, so a lost packet does not cut a word', asyn
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });
+
+test('connection details show the video format and how much data it takes', async ({ browser }) => {
+  const [a, b] = await people(browser, 2);
+  const link = await createRoom(a.page, 'alpha');
+  await joinFromHome(a.page, 'alpha', 'Peer C');
+  await joinFromLink(b.page, link, 'Peer B');
+  await playingVideos(a.page).toBe(1);
+  await a.page.click('#whoBtn');
+  await expect(a.page.locator('#detailsList li', { hasText: 'Peer B' })).toContainText(/\d+p, .*(VP8|VP9|H\.264|H\.265|AV1), [\d.]+ (kbps|Mbps)/, { timeout: 15000 });
+  expectClean(a, b);
+  await a.context.close(); await b.context.close();
+});
+
+test('where the device has H.265, it is preferred for video', async ({ browser }) => {
+  const [a, b] = await people(browser, 2);
+  // Stand in for a device whose browser offers H.265 (test browsers here have no hardware for it).
+  await a.page.addInitScript(() => {
+    const caps = RTCRtpReceiver.getCapabilities.bind(RTCRtpReceiver);
+    RTCRtpReceiver.getCapabilities = kind => {
+      const c = caps(kind);
+      if (kind === 'video') c.codecs = [...c.codecs, { mimeType: 'video/H265', clockRate: 90000, sdpFmtpLine: 'level-id=93;profile-id=1;tier-flag=0;tx-mode=SRST' }];
+      return c;
+    };
+    window.__firstVideoPref = '';
+    const set = RTCRtpTransceiver.prototype.setCodecPreferences;
+    RTCRtpTransceiver.prototype.setCodecPreferences = function (codecs) {
+      if (codecs[0] && codecs[0].mimeType.startsWith('video/') && !window.__firstVideoPref) window.__firstVideoPref = codecs[0].mimeType;
+      return set.call(this, codecs);
+    };
+  });
+  const link = await createRoom(a.page, 'alpha');
+  await joinFromHome(a.page, 'alpha', 'Peer C');
+  await joinFromLink(b.page, link, 'Peer B');
+  await playingVideos(a.page).toBe(1);   // the call works as before
+  await playingVideos(b.page).toBe(1);
+  expect(await a.page.evaluate(() => window.__firstVideoPref)).toBe('video/H265');
+  expectClean(a, b);
+  await a.context.close(); await b.context.close();
+});

@@ -31,8 +31,9 @@ install, no server in the middle. Video and sound are encrypted end to end.
   own. Video or sound that stops arriving is sent again, and a camera that stops is
   replaced. If two people in a group can't reach each other, someone connected to both
   passes their video along. That is still a person in the call, not a server.
-- **Sound and picture.** Up to 1080p in a 1-on-1, shared fairly in groups, and voice
-  with redundancy so a lost packet doesn't cut a word.
+- **Sound and picture.** Up to 1080p in a 1-on-1, shared fairly in groups, H.265 where
+  both devices have it in hardware, and voice with redundancy so a lost packet doesn't cut
+  a word. A data saver drops to about 480p on mobile data.
 - **The site** is a few static files with no build framework, covered by browser tests
   that run before anything goes live.
 

@@ -3,6 +3,24 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.11.0
+
+- **Data saver.** Much lighter video (about 480p) to spare mobile data plans, for what you
+  send and what you receive. Auto turns it on where the phone says it is on mobile data
+  (Android); iPhones don't say, so there it is a switch in the connection details. The
+  details show roughly how many megabytes a minute the video takes, and the call header
+  says "Data saver" while it is on.
+- **"Weak connection" on the tile** while someone's link is wobbling, instead of a silently
+  frozen picture.
+- **Smaller video at the same quality.** Where both devices have H.265 (HEVC) in hardware
+  (iPhones, and Chrome on supported hardware), calls now use it; otherwise nothing changes.
+  The connection details now show the video format and how much data it takes.
+- **Clear help when the camera or microphone is refused**: why, and exactly where to allow
+  it on iPhone (Safari, home screen app, Chrome), Android, Mac and Windows. A camera that is
+  blocked is no longer reported as missing, and Try again also retries the camera.
+- **Pinch to zoom** into someone's video, move around with one finger, double tap to zoom
+  back out.
+
 ## v1.10.0
 
 - **Port knocking for strict mobile carriers.** Some carriers give a phone a new public port

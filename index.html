@@ -153,6 +153,15 @@
       <p class="details-title" id="detailsTitle">Connection</p>
       <p class="details-net" id="detailsNet"></p>
       <ul id="detailsList"></ul>
+      <div class="saver">
+        <p class="saver-title">Data saver</p>
+        <div class="seg" id="saverSeg" role="radiogroup" aria-label="Data saver">
+          <button type="button" role="radio" data-saver="auto">Auto</button>
+          <button type="button" role="radio" data-saver="on">On</button>
+          <button type="button" role="radio" data-saver="off">Off</button>
+        </div>
+        <p class="saver-note" id="saverNote"></p>
+      </div>
       <button class="text light" id="copyLog" type="button">Copy connection log</button>
       <p class="details-keys" id="detailsKeys" hidden>Keys: M mute · V camera · P float · S swap views · I invite · D details · Esc close</p>
       <button class="btn light" id="detailsClose" type="button">Close</button>

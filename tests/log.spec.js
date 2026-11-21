@@ -68,8 +68,10 @@ test('a connection that wobbles for 15 seconds is kept, not rebuilt', async ({ b
   }, on);
   await a.page.waitForTimeout(3000);
   await setWobble(true);
-  await a.page.waitForTimeout(15000);
+  await expect(a.page.locator('#grid .tile .weak-badge')).toBeVisible({ timeout: 5000 });   // says why the picture may freeze
+  await a.page.waitForTimeout(13000);
   await setWobble(false);
+  await expect(a.page.locator('#grid .tile .weak-badge')).toBeHidden({ timeout: 5000 });
   await a.page.waitForTimeout(3000);
 
   const text = await copiedLog(a.page);

@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -101,9 +101,10 @@ function load() {
         const room = { name: r.name, key: r.key };
         if (typeof r.label === 'string' && clean(r.label)) room.label = clean(r.label).slice(0, 40);
         return room;
-      }) : []
+      }) : [],
+      saver: ['on', 'off'].includes(d.saver) ? d.saver : 'auto'
     };
-  } catch { return { name: '', rooms: [] }; }
+  } catch { return { name: '', rooms: [], saver: 'auto' }; }
 }
 function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch {} }
 let data = load();
@@ -454,14 +455,28 @@ const VOICE_CODECS = (() => {
     return [...red, ...opus, ...all.filter(c => !red.includes(c) && !opus.includes(c))];
   } catch { return null; }
 })();
-if (VOICE_CODECS && window.RTCPeerConnection && RTCRtpTransceiver.prototype.setCodecPreferences) {
+// Smaller video at the same quality: H.265 (HEVC) takes noticeably less data than H.264 or
+// VP8 for the same picture. Safari and Chrome only offer it where the device encodes and
+// decodes it in hardware, so preferring it costs no battery; with anyone who lacks it, the
+// call simply uses the next format, as before. VP9 and AV1 are left alone: often software-only
+// on phones, and browsers can't be trusted yet to say when they are efficient.
+const VIDEO_CODECS = (() => {
+  try {
+    const all = RTCRtpReceiver.getCapabilities('video').codecs;
+    const hevc = all.filter(c => /^video\/(H265|HEVC)$/i.test(c.mimeType));
+    if (!hevc.length) return null;
+    return [...hevc, ...all.filter(c => !hevc.includes(c))];
+  } catch { return null; }
+})();
+if ((VOICE_CODECS || VIDEO_CODECS) && window.RTCPeerConnection && RTCRtpTransceiver.prototype.setCodecPreferences) {
   const addTrack = RTCPeerConnection.prototype.addTrack;
   RTCPeerConnection.prototype.addTrack = function (track, ...streams) {
     const sender = addTrack.call(this, track, ...streams);
     try {
-      if (sender && track && track.kind === 'audio') {
+      const prefs = track && (track.kind === 'audio' ? VOICE_CODECS : VIDEO_CODECS);
+      if (sender && prefs) {
         const t = this.getTransceivers().find(x => x.sender === sender);
-        if (t) t.setCodecPreferences(VOICE_CODECS);
+        if (t) t.setCodecPreferences(prefs);
       }
     } catch {}
     return sender;
@@ -535,11 +550,15 @@ async function startMedia() {
   try {
     stream = await gum({ audio: AUDIO, video: videoConstraints(facing) });
   } catch (e) {
-    try { stream = await gum({ audio: AUDIO }); note = 'No camera found. You can still join with sound.'; }
-    catch (e2) {
-      note = (e2 && e2.name === 'NotAllowedError')
-        ? 'Camera and microphone are blocked. On iPhone: tap "aA" in the address bar, then Website Settings, and allow both. In the home screen app: Settings, Apps, Safari, Camera and Microphone.'
-        : 'Could not start the camera or microphone. Another app may be using them.';
+    log('CAMERA', e && e.name);
+    try {
+      stream = await gum({ audio: AUDIO });
+      note = cameraNote(e);
+      if (e && e.name !== 'NotFoundError' && e.name !== 'OverconstrainedError') { $('retryMedia').textContent = 'Try the camera again'; $('retryMedia').hidden = false; }
+    } catch (e2) {
+      log('MICROPHONE', e2 && e2.name);
+      note = mediaHelp(e2, 'the camera and microphone');
+      $('retryMedia').textContent = 'Try again';
       $('retryMedia').hidden = false;
     }
   }
@@ -549,6 +568,50 @@ async function startMedia() {
   $('mediaErr').textContent = note;
   attachLocal();
   updateFlip();
+}
+
+/* When the camera or microphone is refused: say why, and exactly where to allow it on this
+   phone or computer, instead of a generic error. */
+const UA = navigator.userAgent;
+const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_ANDROID = /Android/.test(UA);
+const IS_FIREFOX = /Firefox|FxiOS/.test(UA);
+const IS_CHROME_IOS = /CriOS|EdgiOS/.test(UA);
+const IS_MAC_SAFARI = !IS_IOS && /Macintosh/.test(UA) && /Safari/.test(UA) && !/Chrome|Chromium|Edg/.test(UA);
+const IS_MAC = /Macintosh/.test(UA) && !IS_IOS;
+const STANDALONE = navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+const inAppBrowser = () => /FBAN|FBAV|FB_IAB|FBIOS|Messenger|Instagram|\bLine\/|Snapchat|TikTok|musical_ly|BytedanceWebview/i.test(UA);
+
+function allowSteps(what) {
+  if (inAppBrowser()) return 'Open this link in Safari or Chrome instead: tap the ⋯ menu, then Open in browser.';
+  if (IS_IOS && STANDALONE) return `Open Settings, then Apps, Safari, and set Camera and Microphone to Allow. Then close this app and open it again.`;
+  if (IS_IOS && IS_CHROME_IOS) return `Open Settings, then Apps, Chrome, and turn on Camera and Microphone. Then reload this page.`;
+  if (IS_IOS && IS_FIREFOX) return `Open Settings, then Apps, Firefox, and turn on Camera and Microphone. Then reload this page.`;
+  if (IS_IOS) return `Tap "aA" in the address bar, then Website Settings, and set Camera and Microphone to Allow. If they are missing there: Settings, Apps, Safari, Camera and Microphone, Allow.`;
+  if (IS_ANDROID && IS_FIREFOX) return `Tap the lock left of the web address, and allow ${what}. If that doesn't help: Android Settings, Apps, Firefox, Permissions.`;
+  if (IS_ANDROID) return `Tap the icon left of the web address, then Permissions, and allow ${what}. If they are off for the browser itself: Android Settings, Apps, Chrome, Permissions.`;
+  if (IS_MAC_SAFARI) return `In the Safari menu choose Settings for This Website, and set Camera and Microphone to Allow.`;
+  if (IS_FIREFOX) return `Click the crossed-out camera or microphone in the address bar and remove the block.` + (IS_MAC ? ' On a Mac, also allow Firefox in System Settings, Privacy & Security, Camera and Microphone.' : '');
+  return `Click the icon left of the web address and allow ${what}.` + (IS_MAC ? ' On a Mac, also allow the browser in System Settings, Privacy & Security, Camera and Microphone.' : ' On Windows, also check Settings, Privacy & security, Camera and Microphone.');
+}
+function mediaHelp(e, what) {
+  const name = e && e.name;
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+    return `${what[0].toUpperCase() + what.slice(1)} ${what.includes(' and ') ? 'are' : 'is'} blocked. ${allowSteps(what)} Then tap Try again.`;
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+    return `Another app is using ${what} (a call, FaceTime, another browser tab). Close it, then tap Try again.`;
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return `No microphone found. Plug one in, then tap Try again.`;
+  return `Could not start ${what}. Tap Try again, or reload the page.`;
+}
+// The camera failed but the microphone works: join with sound, and say what to do about the camera.
+function cameraNote(e) {
+  const name = e && e.name;
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'No camera found. You can still join with sound.';
+  if (name === 'NotAllowedError' || name === 'SecurityError') return `The camera is blocked, so you will join with sound only. ${allowSteps('the camera')} Then tap Try the camera again.`;
+  if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') return 'Another app is using the camera (a call, FaceTime, another browser tab), so you will join with sound only. Close it, then tap Try the camera again.';
+  return 'The camera could not start, so you will join with sound only.';
 }
 
 function stopMedia() {
@@ -634,7 +697,11 @@ $('pCam').addEventListener('click', () => { camOn = !camOn; applyToggles(); });
 $('cMic').addEventListener('click', () => { micOn = !micOn; applyToggles(); sendState(); });
 $('cCam').addEventListener('click', () => { camOn = !camOn; applyToggles(); sendState(); });
 $('cFlip').addEventListener('click', () => swapTrack('video', facing === 'user' ? 'environment' : 'user'));
-$('retryMedia').addEventListener('click', startMedia);
+// Trying again also retries the camera when only the microphone started.
+$('retryMedia').addEventListener('click', () => {
+  if (local && !local.getVideoTracks().length && !inCall) stopMedia();
+  startMedia();
+});
 
 // iOS stops (or silences) the camera and microphone when the app goes to the background.
 // Tell the others, and bring our tracks back when we return.
@@ -903,7 +970,7 @@ document.addEventListener('visibilitychange', async () => {
 function sendState(target) {
   if (!stateAction) return;
   const msg = {
-    n: data.name, m: micOn, c: camOn, nt: netType || undefined, v6: netV6 || undefined, s: mySession,
+    n: data.name, m: micOn, c: camOn, nt: netType || undefined, v6: netV6 || undefined, ds: saverOn() || undefined, s: mySession,
     hv: !!(local && local.getVideoTracks()[0]),   // we have a camera to send
     ha: !!(local && local.getAudioTracks()[0]),   // we have a microphone to send
     bg: document.visibilityState === 'hidden',    // in another app (iPhone pauses the camera then)
@@ -1062,6 +1129,8 @@ function applyState(p, msg) {
   p.hasAudio = msg.ha !== false;
   p.bg = msg.bg === true;
   p.v6 = msg.v6 === true;
+  const ds = msg.ds === true;
+  if (ds !== !!p.ds) { p.ds = ds; setTimeout(tuneBitrate, 0); }
 }
 
 // Media watchdog: a connection can be up while someone's video or sound never arrives (or
@@ -1198,6 +1267,9 @@ function watchLinks() {
       for (const ev of ['connectionstatechange', 'iceconnectionstatechange', 'signalingstatechange']) pc.addEventListener(ev, () => { if (inCall) watchLinks(); });
     }
     const st = `${pc.connectionState}/${pc.iceConnectionState}/${pc.signalingState}`;
+    const p = byPeer.get(id);
+    const weak = pc.connectionState === 'disconnected' || pc.iceConnectionState === 'disconnected';
+    if (p && !!p.weak !== weak) { p.weak = weak; renderTile(p); log(weak ? 'WEAK' : 'STEADY', who(p)); }
     if (lastState.get(id) === st) continue;
     const before = lastState.get(id);
     lastState.set(id, st);
@@ -1596,15 +1668,89 @@ function makeTile() {
   const tag = el('div', 'tag');
   const name = el('span');
   tag.append(icon('mic-off'), name);
-  root.append(video, ph, tag);
+  const weak = el('div', 'weak-badge', 'Weak connection');
+  weak.hidden = true;
+  root.append(video, ph, tag, weak);
   root.addEventListener('click', () => { if (root.classList.contains('as-pip')) unswap(); });
-  // Double tap: switch between filling the tile and showing the whole picture.
-  let last = 0;
-  root.addEventListener('pointerup', () => {
-    const now = Date.now();
-    if (now - last < 320) { root.classList.toggle('fit'); last = 0; } else last = now;
+  pinchZoom(root, video);
+  return { root, video, ph, avatar, status, name, weak };
+}
+
+/* Pinch to zoom into someone's video, like FaceTime: two fingers zoom (up to 4x), one finger
+   moves around while zoomed, double tap zooms back out (or, when not zoomed, switches between
+   filling the tile and showing the whole picture). */
+const ZOOM_MAX = 4;
+function pinchZoom(root, video) {
+  const z = video.__zoom = { s: 1, x: 0, y: 0 };
+  const pts = new Map();
+  let start = null, pan = null, moved = false, lastTap = 0;
+  const usable = () => !root.classList.contains('as-pip') && !root.classList.contains('me');
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const apply = () => {
+    const w = root.clientWidth, h = root.clientHeight;
+    const mx = (z.s - 1) * w / 2, my = (z.s - 1) * h / 2;   // keep the picture covering the tile
+    z.x = Math.max(-mx, Math.min(mx, z.x));
+    z.y = Math.max(-my, Math.min(my, z.y));
+    video.style.transform = z.s > 1 ? `translate(${z.x}px, ${z.y}px) scale(${z.s})` : '';
+    root.classList.toggle('zoomed', z.s > 1);
+  };
+  root.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch' || !usable()) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    moved = false;
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      start = { d: dist(a, b) || 1, m: mid(a, b), s: z.s, x: z.x, y: z.y };
+      pan = null;
+    } else if (pts.size === 1) pan = { x: e.clientX, y: e.clientY, ox: z.x, oy: z.y };
   });
-  return { root, video, ph, avatar, status, name };
+  root.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return;
+    const p0 = pts.get(e.pointerId);
+    if (Math.hypot(e.clientX - p0.x, e.clientY - p0.y) > 8) moved = true;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2 && start) {
+      const [a, b] = [...pts.values()];
+      const m = mid(a, b);
+      z.s = Math.max(1, Math.min(ZOOM_MAX, start.s * dist(a, b) / start.d));
+      const k = z.s / start.s;
+      z.x = start.x * k + (m.x - start.m.x);
+      z.y = start.y * k + (m.y - start.m.y);
+      apply();
+    } else if (pts.size === 1 && pan && z.s > 1) {
+      z.x = pan.ox + (e.clientX - pan.x);
+      z.y = pan.oy + (e.clientY - pan.y);
+      apply();
+    }
+  });
+  const up = e => {
+    if (!pts.has(e.pointerId)) return;
+    const wasPinch = pts.size > 1 || start;
+    pts.delete(e.pointerId);
+    if (pts.size < 2) start = null;
+    if (pts.size === 1) { const [p] = [...pts.values()]; pan = { x: p.x, y: p.y, ox: z.x, oy: z.y }; }
+    if (z.s < 1.05 && z.s !== 1) { z.s = 1; z.x = z.y = 0; apply(); }
+    if (wasPinch || moved || e.type === 'pointercancel') { lastTap = 0; return; }
+    const now = Date.now();
+    if (now - lastTap < 320) {                // double tap
+      lastTap = 0;
+      if (z.s > 1) { z.s = 1; z.x = z.y = 0; apply(); } else root.classList.toggle('fit');
+    } else lastTap = now;
+  };
+  root.addEventListener('pointerup', up);
+  root.addEventListener('pointercancel', up);
+  // Mouse and pen: double click as before.
+  let lastType = '';
+  root.addEventListener('pointerdown', e => { lastType = e.pointerType; }, true);
+  root.addEventListener('dblclick', () => { if (lastType === 'touch') return; if (z.s > 1) { z.s = 1; z.x = z.y = 0; apply(); } else root.classList.toggle('fit'); });
+}
+function resetZoom(video) {
+  const z = video && video.__zoom;
+  if (!z) return;
+  z.s = 1; z.x = z.y = 0;
+  video.style.transform = '';
+  video.parentElement && video.parentElement.classList.remove('zoomed');
 }
 
 function renderTile(p) {
@@ -1618,6 +1764,7 @@ function renderTile(p) {
   p.ui.name.textContent = p.name || '…';
   p.ui.root.classList.toggle('muted', !p.mic);
   p.ui.root.classList.toggle('reconnecting', p.reconnecting);
+  p.ui.weak.hidden = !(p.weak && !p.reconnecting && p.peerId);
   if (inCall) updateFloat();
 }
 
@@ -1656,6 +1803,7 @@ function swapView() {
 
 function unswap() {
   if (!swapped) return;
+  for (const v of document.querySelectorAll('#grid .tile video')) resetZoom(v);
   const { me, other } = swapped;
   swapped = null;
   $('call').classList.remove('swapped');
@@ -1801,7 +1949,7 @@ function updateMeta() {
   if (!n) { $('callMeta').textContent = 'Just you'; return; }
   const s = Math.floor((Date.now() - t0) / 1000);
   const time = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-  $('callMeta').textContent = `${n + 1} people · ${time}`;
+  $('callMeta').textContent = `${n + 1} people · ${time}` + (saverOn() ? ' · Data saver' : '');
 }
 
 // Show whether we can reach the relays that introduce people to each other.
@@ -1843,16 +1991,56 @@ function sendProfile(others) {
   return { bitrate: 1000000, scale: 2 };
 }
 
+/* Data saver: much lighter video (about 480p) for people on mobile data. Auto turns it on
+   where the phone says it is on mobile data or asks to save data (Android Chrome); iPhones
+   don't say, so there it is a switch. It also asks the others to send us lighter video, so it
+   saves on what we receive, not only on what we send. */
+const SAVER_AUDIO = 32000;
+function saverProfile(others) {
+  if (others <= 1) return { bitrate: 600000, scale: 2.25 };
+  if (others === 2) return { bitrate: 400000, scale: 3 };
+  return { bitrate: 300000, scale: 3 };
+}
+const conn = navigator.connection || null;
+const onMobileData = () => !!conn && (conn.type === 'cellular' || conn.saveData === true);
+const saverOn = () => data.saver === 'on' || (data.saver === 'auto' && onMobileData());
+if (conn && conn.addEventListener) conn.addEventListener('change', () => { if (inCall) saverChanged(); });
+
+function saverChanged() {
+  renderSaver();
+  if (!inCall) return;
+  log('DATA SAVER', saverOn() ? 'on' : 'off', `(${data.saver})`);
+  sendState();
+  tuneBitrate();
+  updateMeta();
+}
+// What the data saver setting means right now, in megabytes a minute (sent and received).
+function renderSaver() {
+  for (const b of document.querySelectorAll('#saverSeg button')) b.setAttribute('aria-checked', String(b.dataset.saver === data.saver));
+  const others = Math.max(1, people.size);
+  const mb = p => Math.round(p.bitrate * others * 2 / 8 / 1e6 * 60);   // to and from each person
+  const on = saverOn();
+  const why = data.saver === 'auto' ? (on ? 'On, because this phone is on mobile data.' : (conn ? 'Off: not on mobile data.' : 'Off: this phone doesn\'t say when it is on mobile data, so choose On there.')) : (on ? 'On.' : 'Off.');
+  $('saverNote').textContent = `${why} Video uses up to about ${mb(on ? saverProfile(others) : sendProfile(others))} MB a minute${on ? ` (instead of ${mb(sendProfile(others))})` : ''}.`;
+}
+for (const b of document.querySelectorAll('#saverSeg button')) {
+  b.addEventListener('click', () => { data.saver = b.dataset.saver; save(); saverChanged(); });
+}
+
 function tuneBitrate() {
   if (!room) return;
   const n = people.size;
   if (!n) return;
-  const video = sendProfile(n);
+  const mine = saverOn();
   let all = {};
   try { all = room.getPeers(); } catch {}
   for (const id of Object.keys(all)) {
     const pc = all[id] && all[id].connection;
     if (!pc) continue;
+    const them = byPeer.get(id);
+    const light = mine || !!(them && them.ds);   // we save data, or they asked us to
+    const video = light ? saverProfile(n) : sendProfile(n);
+    const audio = light ? SAVER_AUDIO : AUDIO_BITRATE;
     for (const sender of pc.getSenders()) {
       if (!sender.track) continue;
       const params = sender.getParameters();
@@ -1863,8 +2051,8 @@ function tuneBitrate() {
         e.maxBitrate = video.bitrate;
         e.scaleResolutionDownBy = video.scale;
       } else {
-        if (e.maxBitrate === AUDIO_BITRATE) continue;
-        e.maxBitrate = AUDIO_BITRATE;
+        if (e.maxBitrate === audio) continue;
+        e.maxBitrate = audio;
       }
       sender.setParameters(params).catch(() => {});
     }
@@ -1963,15 +2151,26 @@ async function connectionPath(peerId) {
 }
 
 // What we are actually receiving from someone right now, e.g. "1080p, 30 fps".
+const rates = new Map();   // peerId -> last { bytes, t }, for the data rate in the details
 async function receiving(peerId) {
   let pc = null;
   try { const info = room && room.getPeers()[peerId]; pc = info && info.connection; } catch {}
   if (!pc) return '';
   try {
     let line = '';
-    (await pc.getStats()).forEach(s => {
+    const stats = await pc.getStats();
+    stats.forEach(s => {
       if (s.type === 'inbound-rtp' && s.kind === 'video' && s.frameHeight) {
         line = `${s.frameHeight}p` + (s.framesPerSecond ? `, ${Math.round(s.framesPerSecond)} fps` : '');
+        // Which video format, and how much data it takes right now.
+        const codec = s.codecId && stats.get(s.codecId);
+        if (codec && codec.mimeType) line += ', ' + codec.mimeType.replace(/^video\//i, '').replace(/^H265$/i, 'H.265').replace(/^H264$/i, 'H.264');
+        const prev = rates.get(peerId), now = Date.now();
+        rates.set(peerId, { bytes: s.bytesReceived, t: now });
+        if (prev && now > prev.t && s.bytesReceived >= prev.bytes) {
+          const kbps = (s.bytesReceived - prev.bytes) * 8 / (now - prev.t);   // bits per ms = kbit/s
+          line += ', ' + (kbps >= 1000 ? (kbps / 1000).toFixed(1) + ' Mbps' : Math.round(kbps) + ' kbps');
+        }
       }
     });
     return line;
@@ -1979,6 +2178,7 @@ async function receiving(peerId) {
 }
 
 async function renderDetails() {
+  renderSaver();
   if ($('details').hidden) return;
   $('detailsNet').textContent = 'Your network: ' + (NET_LABEL[netType] || 'checking…') +
     (netType ? (netV6 ? ' Has IPv6, which helps reach other phones on mobile data.' : ' No IPv6.') : '');
