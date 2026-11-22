@@ -3,6 +3,15 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.13.0
+
+- **Sharing sends the page.** Share now hands over the link itself rather than a text that
+  contains it, so AirDrop opens the room on the other phone (instead of saving a note) and
+  chat apps show it as a link.
+- **The room's name in the address bar during a call** (never its password). Sharing or
+  bookmarking that address works: people who have the room saved go straight to it, anyone
+  else is asked for the room's password first. Outside a call the address stays clean.
+
 ## v1.12.0
 
 - **Camera zoom, like FaceTime and the iPhone camera.** A button above the bar shows the zoom

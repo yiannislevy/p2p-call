@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.12.0';
+const VERSION = '1.13.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -176,8 +176,9 @@ $('sheetBack').addEventListener('click', closeSheet);
 $('sheetLink').addEventListener('focus', e => e.target.select());
 $('sheetShare').addEventListener('click', async () => {
   if (!sheetRoom) return;
-  const text = `Join my "${sheetRoom.name}" video room:\n${inviteLink(sheetRoom)}`;
-  try { await navigator.share({ text }); closeSheet(); } catch {}
+  // The link itself, not a text containing it: AirDrop then opens the page on the other
+  // phone instead of saving a note, and chat apps show it as a link.
+  try { await navigator.share({ title: `${sheetRoom.name} · video room`, url: inviteLink(sheetRoom) }); closeSheet(); } catch {}
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(); });
 
@@ -187,6 +188,7 @@ const SCREENS = ['home', 'add', 'lobby', 'call'];
 let current = 'home';
 
 function show(s) {
+  if (s !== 'call' && location.hash) history.replaceState(history.state, '', location.pathname + location.search);
   for (const id of SCREENS) $(id).hidden = id !== s;
   current = s;
   document.body.dataset.screen = s;
@@ -355,8 +357,11 @@ function addMode(pasting) {
   $('importPart').hidden = !pasting;
   $('addTitle').textContent = pasting ? 'Paste invite links' : 'Add a room';
 }
+let joinAfterSave = false;
 function openAdd(pasting) {
   addMode(!!pasting);
+  joinAfterSave = false;
+  $('createLead').textContent = 'Create a new room, or enter the name and password someone gave you.';
   $('addName').value = '';
   $('addKey').value = newPassword();
   $('addErr').textContent = '';
@@ -367,6 +372,16 @@ function openAdd(pasting) {
   $('importLabel').textContent = canRead ? 'Or paste them here' : 'Paste them here';
   showFound();
   push('add');
+}
+// Opened from an address with only a room name: ask for that room's password, then go in.
+function openAddForRoom(name) {
+  openAdd(false);
+  joinAfterSave = true;
+  $('addTitle').textContent = `Join "${name}"`;
+  $('createLead').textContent = 'Enter the room\'s password. Ask whoever sent you the address for it, or for an invite link.';
+  $('addName').value = name;
+  $('addKey').value = '';
+  setTimeout(() => $('addKey').focus(), 50);
 }
 $('toPaste').addEventListener('click', () => { addMode(true); $('importErr').textContent = ''; showFound(); });
 
@@ -432,6 +447,7 @@ $('saveBtn').addEventListener('click', () => {
   if (/\s/.test(r.key)) { $('addErr').textContent = 'The password cannot contain spaces.'; return; }
   const existed = data.rooms.some(x => sameRoom(x, r));
   addRoom(r);
+  if (joinAfterSave) { joinAfterSave = false; history.replaceState({ s: 'home' }, ''); openLobby(r, false); return; }
   pendingToast = existed ? 'You already had this room' : 'Room saved. Use the share button to invite people.';
   back();
 });
@@ -866,7 +882,9 @@ async function startCall(r, resumeSession) {
 
   inCall = true;
   presence.announce(r, () => data.name, () => mySession);
-  history.replaceState({ s: 'call' }, '');
+  // The address bar shows the room's name (never its password), so the address can be shared
+  // or bookmarked: people who have the room go straight in, others are asked for the password.
+  history.replaceState({ s: 'call' }, '', location.pathname + location.search + '#room=' + encodeURIComponent(r.name));
   show('call');
   rememberActive('call');
   const saved = data.rooms.find(x => sameRoom(x, r));
@@ -2326,14 +2344,24 @@ history.replaceState({ s: 'home' }, '');
 $('ver').textContent = 'Version ' + VERSION;
 renderHome();
 
-// Opened from an invite link: read it, then wipe it from the address bar.
-const resume = !location.hash.startsWith('#room=') && recallActive();
+// Opened from an invite link (#room=…&key=…): read it, then wipe it from the address bar.
+// Opened from a room's address (#room=… only, as shown during a call): go into that room if
+// it is saved here, otherwise ask for its password. A refresh during a call rejoins it.
+const hashParams = location.hash.startsWith('#room=') ? new URLSearchParams(location.hash.slice(1)) : null;
+const hashName = hashParams ? clean(hashParams.get('room') || '').slice(0, 40) : '';
+const hashKey = hashParams ? (hashParams.get('key') || '').trim() : '';
+const resume = !hashKey && recallActive();
 if (resume) openLobby(resume, resume.invited, resume.stage === 'call' ? resume : null);
-
-if (location.hash.startsWith('#room=')) {
-  const params = new URLSearchParams(location.hash.slice(1));
-  const r = { name: clean(params.get('room')).slice(0, 40), key: (params.get('key') || '').trim() };
+else if (hashParams) {
   history.replaceState({ s: 'home' }, '', location.pathname + location.search);
-  if (validRoom(r)) openLobby(r, true);
-  else toast('That invite link is incomplete. Ask for it again.');
+  if (hashKey) {
+    const r = { name: hashName, key: hashKey };
+    if (validRoom(r)) openLobby(r, true);
+    else toast('That invite link is incomplete. Ask for it again.');
+  } else if (hashName) {
+    const saved = data.rooms.filter(x => x.name === hashName);
+    if (saved.length === 1) openLobby(saved[0], false);
+    else if (saved.length > 1) toast(`You have more than one room called "${hashName}". Pick it below.`, 5000);
+    else openAddForRoom(hashName);
+  }
 }
