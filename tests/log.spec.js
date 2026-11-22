@@ -28,7 +28,9 @@ test('the connection log records links, their path, and why a link went down', a
   let text = await copiedLog(a.page);
   expect(text).toMatch(/^Call \d+\.\d+\.\d+ · /);
   for (const line of ['JOIN call room', 'LINK UP', 'STATE', 'connected/', 'PATH Peer B']) expect(text).toContain(line);
-  expect(text.split('\n').slice(1).join('\n')).not.toMatch(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);   // no IP addresses (line 1 is the browser)
+  for (const part of ['Network: ', 'Public address: ', 'Running in: the browser', '- Peer B[', ': linked', '\nLog:\n']) expect(text).toContain(part);
+  // The timeline itself holds no addresses (only this device's public address is listed, above it).
+  expect(text.split('\nLog:\n')[1]).not.toMatch(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
   expect(text).not.toContain(link.split('key=')[1]);                    // no room password
 
   // The link breaks: the log says it went down and that the app is reconnecting.

@@ -64,10 +64,13 @@ const modules = files.filter(f => f.endsWith('.js') && f !== 'app.js');
 app = app.replace(/from '\.\/([\w-]+\.js)'/g, (m, f) => (modules.includes(f) ? `from './${f}?v=${version}'` : m));
 
 if (relay) {
-  if (!/^wss?:\/\/[\w.:-]+$/.test(relay)) throw new Error(`Bad relay URL: ${relay}`);
-  app = app.replace(/const RELAYS = \[[^\]]*\];/s, `const RELAYS = [${JSON.stringify(relay)}];`);
-  html = html.replace(/connect-src [^;]*;/, `connect-src ${relay};`);
-  if (!app.includes(JSON.stringify(relay)) || !html.includes(`connect-src ${relay};`)) throw new Error('Could not point the build at the test relay');
+  // One relay, or several separated by commas (tests use two addresses of the same relay to
+  // get every message twice, as the six public relays do).
+  const list = relay.split(',');
+  for (const r of list) if (!/^wss?:\/\/[\w.:-]+$/.test(r)) throw new Error(`Bad relay URL: ${r}`);
+  app = app.replace(/const RELAYS = \[[^\]]*\];/s, `const RELAYS = ${JSON.stringify(list)};`);
+  html = html.replace(/connect-src [^;]*;/, `connect-src ${list.join(' ')};`);
+  if (!app.includes(JSON.stringify(list)) || !html.includes(`connect-src ${list.join(' ')};`)) throw new Error('Could not point the build at the test relay');
 }
 
 function speedUp(file, text) {

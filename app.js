@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.13.0';
+const VERSION = '1.14.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -158,6 +158,11 @@ function inviteLink(r) {
 let sheetRoom = null;
 async function invite(r) {
   const url = inviteLink(r);
+  // On phones: the phone's own share sheet straight away (AirDrop, Messages, Copy…).
+  if (navigator.share && (IS_IOS || IS_ANDROID)) {
+    try { await navigator.share({ title: `${r.name} · video room`, url }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; }   // closed it: nothing to do
+  }
   const copied = await copyText(url);
   sheetRoom = r;
   $('sheetTitle').textContent = copied ? 'Invite link copied' : 'Copy this invite link';
@@ -311,6 +316,62 @@ function editRow(r, i) {
 }
 
 $('editBtn').addEventListener('click', () => { editing = !editing; renderHome(); });
+/* Diagnostics: everything useful for working out what went wrong, in one copy, to paste
+   anywhere. It includes this device's public IP address (from the network check), so the
+   button says what it copies. Other people's addresses are not included. */
+const troubleAt = [];
+function trouble(what, now) {
+  troubleAt.push(Date.now());
+  while (troubleAt.length && Date.now() - troubleAt[0] > 60000) troubleAt.shift();
+  if (now || troubleAt.length >= 3) $('troubleBtn').classList.add('alert');
+}
+async function diagnostics() {
+  const conn = navigator.connection;
+  const lines = [
+    `Call ${VERSION} · ${navigator.userAgent}`,
+    `When: ${new Date().toString()}`,
+    `Running in: ${inAppBrowser() ? 'an app\'s built-in browser' : STANDALONE ? 'the home screen app' : 'the browser'} · screen ${screen.width}x${screen.height} @${devicePixelRatio} · language ${navigator.language}`,
+    `Network: ${NET_LABEL[netType] ? netType : 'unknown'}${netV6 ? ', IPv6' : ', no IPv6'}${conn ? ` · type ${conn.type || '?'}, effective ${conn.effectiveType || '?'}, ~${conn.downlink || '?'} Mbps, rtt ${conn.rtt || '?'} ms${conn.saveData ? ', save-data' : ''}` : ''} · data saver ${saverOn() ? 'on' : 'off'} (${data.saver})`,
+    `Public address: ${netAddrs.join(', ') || 'unknown'}`,
+    `Call: ${inCall ? 'in a call' : current} · people ${people.size} · rejoins ${rejoins} · since start ${Math.round((Date.now() - logStart) / 1000)} s`
+  ];
+  const v = local && local.getVideoTracks()[0], a = local && local.getAudioTracks()[0];
+  let vs = {};
+  try { vs = v ? v.getSettings() : {}; } catch {}
+  lines.push(`Me: mic ${a ? (micOn ? 'on' : 'muted') : 'none'} · camera ${v ? (camOn ? `on ${vs.width || '?'}x${vs.height || '?'}@${Math.round(vs.frameRate || 0)}` : 'off') : 'none'}${zoomState.track ? ` · zoom ${fmtZoom(zoomState.value)}` : ''} · float ${canFloat() ? 'available' : 'not available'}${lastFloatError ? ` (last: ${lastFloatError})` : ''}`);
+  for (const p of people.values()) {
+    const state = p.reconnecting ? 'reconnecting' : p.relayVia ? 'passed along' : p.peerId ? 'linked' : 'no link';
+    let rx = '';
+    try { rx = p.peerId ? await receiving(p.peerId) : ''; } catch {}
+    lines.push(`- ${who(p)}: ${state}${p.net ? ` · their network ${p.net}${p.v6 ? ', IPv6' : ''}` : ''}${p.path ? ` · path ${p.path}` : ''}${rx ? ` · receiving ${rx}` : ''}${p.ds ? ' · data saver' : ''}${p.weak ? ' · weak' : ''}`);
+  }
+  for (const m of roomMembers) if (m.cs && m.cs !== mySession && !people.has(m.cs)) lines.push(`- ${m.name || '?'}[${m.cs.slice(-6)}]: in the room, not connected`);
+  lines.push('', 'Log:');
+  return lines.concat(connLog).join('\n');
+}
+// Copy, also on iPhones, where copying must start straight from the tap: the text is handed
+// over as a promise and filled in once gathered.
+async function copyDiagnostics() {
+  const text = diagnostics();
+  try {
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then(t => new Blob([t], { type: 'text/plain' })) })]);
+    } else if (!(await copyText(await text))) throw new Error('refused');
+    toast('Diagnostics copied (includes your public IP address). Paste them to whoever asked.', 4500);
+    $('troubleBtn').classList.remove('alert');
+  } catch {
+    if (await copyText(await text)) { toast('Diagnostics copied (includes your public IP address).', 4500); return; }
+    sheetRoom = null;
+    $('sheetTitle').textContent = 'Diagnostics';
+    $('sheetSub').textContent = 'Copying was refused. Select all of it and copy it.';
+    $('sheetLink').value = (await text).replace(/\n/g, '  ');
+    $('sheetShare').hidden = true;
+    $('sheetBack').hidden = false;
+    $('sheet').hidden = false;
+  }
+}
+$('troubleBtn').addEventListener('click', copyDiagnostics);
+
 function logText() {
   const head = [
     `Call ${VERSION} · ${navigator.userAgent}`,
@@ -321,10 +382,7 @@ function logText() {
   ];
   return head.concat(connLog).join('\n');
 }
-$('copyLog').addEventListener('click', async () => {
-  if (await copyText(logText())) toast('Connection log copied. Paste it to whoever asked for it.', 4000);
-  else toast('Copying was refused. Try again.', 4000);
-});
+$('copyLog').addEventListener('click', copyDiagnostics);
 
 $('copyAllBtn').addEventListener('click', async () => {
   const text = exportText();
@@ -812,7 +870,16 @@ function openLobby(r, invited, resume) {
 
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.target.blur(); $('joinBtn').click(); } });
 $('joinBtn').addEventListener('click', () => join(''));
+// iPhones only let a video start by itself once it has been started from a tap: do that for the
+// floating video now, from the tap on Join, so it can float later.
+function unlockFloat() {
+  try {
+    if (!floatVideo.srcObject) { const t = cardTrack(null); if (t) floatVideo.srcObject = new MediaStream([t]); }
+    floatVideo.play().catch(() => {});
+  } catch {}
+}
 async function join(resumeSession) {
+  unlockFloat();
   const name = clean($('nameInput').value).slice(0, 30);
   if (!name) { $('lobbyErr').textContent = 'Add your name so the others know who joined.'; $('nameInput').focus(); return; }
   $('lobbyErr').textContent = '';
@@ -1025,6 +1092,7 @@ function removePerson(p, quietly) {
 function markReconnecting(p) {
   if (p.reconnecting) return;   // keep the original deadline
   log('RECONNECTING', who(p), p.away ? '(said: refreshing)' : '');
+  if (!p.away) trouble('reconnecting');
   p.reconnecting = true;
   p.since = Date.now();
   renderTile(p);
@@ -1070,6 +1138,7 @@ function onPeerJoin(peerId) {
   p.peerId = peerId;
   p.linkedAt = Date.now();
   log('LINK UP', 'peer', peerId.slice(0, 6));
+  watchLinks();
   byPeer.set(peerId, p);
   if (local) room.addStream(local, { target: peerId }).catch(() => {});
   sendState(peerId);
@@ -1306,7 +1375,10 @@ async function describeLink(id, pc) {
     if (!pair) return;
     const l = stats.get(pair.localCandidateId) || {}, r = stats.get(pair.remoteCandidateId) || {};
     const rtt = pair.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) + ' ms' : '?';
-    log('PATH', who(byPeer.get(id)), `${l.candidateType || '?'}/${l.protocol || '?'}${l.networkType ? '/' + l.networkType : ''} -> ${r.candidateType || '?'}/${r.protocol || '?'}`, 'rtt', rtt);
+    const path = `${l.candidateType || '?'}/${l.protocol || '?'}${l.networkType ? '/' + l.networkType : ''} -> ${r.candidateType || '?'}/${r.protocol || '?'}`;
+    const p = byPeer.get(id);
+    if (p) p.path = path + ', rtt ' + rtt;
+    log('PATH', who(p), path, 'rtt', rtt);
   } catch {}
 }
 
@@ -1452,6 +1524,7 @@ function checkUnseen() {
     if (!u.told && now - u.first >= UNSEEN_MS * 2) {
       u.told = true;
       log('CANNOT CONNECT to', name, '-', netType || 'network unknown');
+      trouble('cannot connect', true);
       toast(`${name} is in the room but can't connect to you. ${failureReason()}`, 8000);
       renderDetails();
     }
@@ -1936,8 +2009,17 @@ function updateFloat() {
   } else if (floatVideo.paused) floatVideo.play().catch(() => {});
 }
 
+let lastFloatError = '';
+// On iPhone and iPad, floating works in Safari but not in home screen web apps (an Apple
+// limitation), so say so instead of failing.
+const FLOAT_BLOCKED = IS_IOS && STANDALONE;
+
 async function toggleFloat() {
   if (!inCall) return;
+  if (FLOAT_BLOCKED) {
+    toast('On iPhone, floating works in Safari but not in the home screen app (an Apple limitation). Open the room in Safari to float.', 6000);
+    return;
+  }
   try {
     if (isFloating()) {
       if (document.pictureInPictureElement) await document.exitPictureInPicture();
@@ -1949,12 +2031,14 @@ async function toggleFloat() {
     // The hidden video isn't ready (iPhones may hold it back): float the person's own tile.
     const target = floatVideo.readyState >= 2 ? floatVideo
       : (floatTarget && floatTarget.ui.video.readyState >= 2 ? floatTarget.ui.video : floatVideo);
-    log('FLOAT', target === floatVideo ? 'following the talker' : 'their own video', `(ready ${floatVideo.readyState})`);
+    log('FLOAT', target === floatVideo ? 'following the talker' : 'their own video', `(ready ${floatVideo.readyState}, paused ${floatVideo.paused}, tile ready ${floatTarget ? floatTarget.ui.video.readyState : '-'})`);
     // No waiting before this call: iOS only allows it straight from the tap.
     if (target.requestPictureInPicture && document.pictureInPictureEnabled) await target.requestPictureInPicture();
     else target.webkitSetPresentationMode('picture-in-picture');
   } catch (e) {
-    log('FLOAT failed', e && e.name, e && e.message ? String(e.message).slice(0, 80) : '');
+    lastFloatError = `${e && e.name}: ${e && e.message ? String(e.message).slice(0, 80) : ''}`;
+    log('FLOAT failed', lastFloatError);
+    trouble('float', true);
     toast(`The video can't float right now (${(e && e.name) || 'refused'}). Try again in a moment.`);
   }
 }
@@ -2132,7 +2216,7 @@ const NET_LABEL = {
   strict: 'Strict: calls work with people on normal home networks, but can fail with another strict network (some mobile data, offices).',
   blocked: 'Blocked: direct calls only work with people on this same network. For anyone else, switch to mobile data or another wifi.'
 };
-let netType = '', netChecked = 0, netCheck = null, netV6 = false;
+let netType = '', netChecked = 0, netCheck = null, netV6 = false, netAddrs = [];
 
 function checkNetwork(force) {
   if (netCheck) return netCheck;
@@ -2160,6 +2244,7 @@ async function probe() {
       return addr.includes(':') && !/^(fe80|fc|fd)/i.test(addr);
     });
     const mapped = found.filter(c => (c.type || (c.candidate.match(/ typ (\w+)/) || [])[1]) === 'srflx');
+    netAddrs = [...new Set(found.filter(c => /srflx/.test(c.candidate)).map(c => (c.address || c.candidate.split(' ')[4]) + ':' + (c.port || c.candidate.split(' ')[5])))];
     // No public address: blocked only if the check really finished (a slow mobile connection
     // can simply run out of time, which says nothing about the network).
     if (!mapped.length) return finished ? 'blocked' : '';

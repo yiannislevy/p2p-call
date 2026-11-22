@@ -14,6 +14,9 @@ mkdirSync(ROOT, { recursive: true });
 
 const build = (...a) => execFileSync('node', ['scripts/build.mjs', ...a, '--relay', RELAY], { stdio: 'inherit' });
 build('--out', join(ROOT, 'current'), '--fast-timers');
+// The same, but hearing everything through two relays, the second one slow, so every
+// handshake arrives twice and the copies come in a little apart, as with the public relays.
+execFileSync('node', ['scripts/build.mjs', '--out', join(ROOT, 'twice'), '--fast-timers', '--relay', `${RELAY},ws://localhost:7778`], { stdio: 'inherit' });
 
 // Previous release, to prove the new version can still call people who haven't updated.
 const current = (readFileSync('app.js', 'utf8').match(/const VERSION = '([^']+)'/) || [])[1];
@@ -38,13 +41,15 @@ createServer((req, res) => {
 }).listen(8800, () => console.log('serving tests/.sites on http://localhost:8800'));
 
 // Minimal Nostr relay: forwards each event to live subscriptions whose filters match.
-const wss = new WebSocketServer({ port: 7777 });
-const subs = new Map();
+const subs = new Map();   // every client of every relay port: they share one stream of events
 const matches = (f, ev) =>
   (!f.kinds || f.kinds.includes(ev.kind)) &&
   (!f.since || ev.created_at >= f.since) &&
   Object.keys(f).filter(k => k.startsWith('#')).every(k => ev.tags.some(t => t[0] === k.slice(1) && f[k].includes(t[1])));
-wss.on('connection', ws => {
+// Port 7777 is the relay. Port 7778 is the same relay, but slow: it delivers every event to
+// its clients 800 ms late, like a far-away public relay.
+const relayPort = (port, delay) => new WebSocketServer({ port }).on('connection', ws => {
+  ws.__delay = delay;
   subs.set(ws, new Map());
   ws.on('message', raw => {
     let m;
@@ -54,9 +59,14 @@ wss.on('connection', ws => {
     else if (m[0] === 'EVENT') {
       const ev = m[1];
       ws.send(JSON.stringify(['OK', ev.id, true, '']));
-      for (const [client, s] of subs) for (const [id, filters] of s) if (filters.some(f => matches(f, ev))) client.send(JSON.stringify(['EVENT', id, ev]));
+      for (const [client, s] of subs) for (const [id, filters] of s) if (filters.some(f => matches(f, ev))) {
+        const send = () => { if (client.readyState === 1) client.send(JSON.stringify(['EVENT', id, ev])); };
+        if (client.__delay) setTimeout(send, client.__delay); else send();
+      }
     }
   });
   ws.on('close', () => subs.delete(ws));
 });
+relayPort(7777, 0);
+relayPort(7778, 800);
 console.log(`test relay on ${RELAY}`);

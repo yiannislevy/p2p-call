@@ -108,3 +108,19 @@ test('if the hidden floating video is not ready, the person\'s own video floats 
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });
+
+test('in the iPhone home screen app, Float explains that only Safari can float', async ({ browser }) => {
+  const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+  const a = await person(browser, { userAgent: ua }), b = await person(browser);
+  await a.page.addInitScript(fakeFloating);
+  await a.page.addInitScript(() => Object.defineProperty(navigator, 'standalone', { get: () => true }));
+  const link = await createRoom(b.page, 'alpha');
+  await joinFromHome(b.page, 'alpha', 'Peer B');
+  await joinFromLink(a.page, link, 'Peer C');
+  await playingVideos(a.page).toBe(1);
+  await a.page.click('#cFloat');
+  await expect(a.page.locator('#toasts')).toContainText('not in the home screen app');
+  expect(await a.page.evaluate(() => window.__floated)).toBe(0);
+  expectClean(a, b);
+  await a.context.close(); await b.context.close();
+});

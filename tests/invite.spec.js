@@ -45,3 +45,18 @@ test('a broken invite link is handled calmly', async ({ browser }) => {
   expectClean(a);
   await a.context.close();
 });
+
+test('on a phone, Invite opens the phone\'s own share sheet with the link', async ({ browser }) => {
+  const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1';
+  const { person } = await import('./helpers.js');
+  const a = await person(browser, { userAgent: ua });
+  await a.page.addInitScript(() => { window.__shared = null; navigator.share = d => { window.__shared = d; return Promise.resolve(); }; });
+  await a.page.goto('/current/');
+  await a.page.click('#addBtn');
+  await a.page.fill('#addName', 'alpha');
+  await a.page.click('#saveBtn');
+  await a.page.locator('.room', { hasText: 'alpha' }).locator('.icon-btn').click();
+  await expect.poll(() => a.page.evaluate(() => window.__shared && window.__shared.url)).toMatch(/#room=alpha&key=/);
+  await expect(a.page.locator('#sheet')).toBeHidden();
+  await a.context.close();
+});

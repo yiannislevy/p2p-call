@@ -302,3 +302,8 @@ body[data-screen="call"] #toasts { top: calc(var(--st) + 70px); bottom: auto; }
 #zoomArc line.big { stroke: #fff; stroke-width: 2; }
 #zoomArc text { fill: #fff; font-size: 12px; font-weight: 600; text-anchor: middle; cursor: pointer; }
 .zoom-mark { position: absolute; left: 50%; top: 4px; width: 2px; height: 18px; margin-left: -1px; background: #f5d26b; border-radius: 1px; pointer-events: none; }
+
+/* diagnostics: a discreet link under the room name, which stands out when something goes wrong */
+#callTop .top-left { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+#callTop .trouble { display: block; margin-top: 4px; padding: 2px 0; background: none; border: 0; color: rgba(242, 241, 237, .45); font: inherit; font-size: 12px; text-align: left; }
+#callTop .trouble.alert { color: #f5d26b; font-weight: 600; }

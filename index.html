@@ -141,10 +141,13 @@
     <button class="btn light" id="aloneInvite" type="button"><svg class="ic"><use href="#i-share"/></svg>Invite people</button>
   </div>
   <header id="callTop">
+    <div class="top-left">
     <button class="who" id="whoBtn" type="button" aria-label="Connection details" title="Connection details (D)">
       <span id="callRoom"></span>
       <span class="meta-row"><span id="callMeta"></span><svg class="ic"><use href="#i-info"/></svg></span>
     </button>
+    <button class="trouble" id="troubleBtn" type="button">Problem? Copy diagnostics</button>
+    </div>
     <button class="btn ghost" id="topInvite" type="button" aria-label="Invite people" title="Invite people (I)"><svg class="ic"><use href="#i-share"/></svg>Invite</button>
   </header>
   <button class="btn light" id="tapAudio" type="button" hidden>Tap to turn on sound</button>
@@ -162,7 +165,7 @@
         </div>
         <p class="saver-note" id="saverNote"></p>
       </div>
-      <button class="text light" id="copyLog" type="button">Copy connection log</button>
+      <button class="text light" id="copyLog" type="button">Copy diagnostics</button>
       <p class="details-keys" id="detailsKeys" hidden>Keys: M mute · V camera · P float · S swap views · I invite · D details · Esc close</p>
       <button class="btn light" id="detailsClose" type="button">Close</button>
     </div>

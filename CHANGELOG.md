@@ -3,6 +3,22 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.14.0
+
+- **Copy diagnostics.** A small "Problem? Copy diagnostics" link under the room's name copies
+  everything useful for working out a problem, ready to paste anywhere: version, device,
+  how the page is running (browser, home screen app, an app's built-in browser), network
+  type and quality, this device's public address, each person's link, path and what is
+  arriving, and the connection log. It turns yellow when something keeps going wrong
+  (repeated reconnecting, someone who can't connect, floating failing).
+- **The phone's own share sheet.** On phones, Invite opens the share sheet straight away
+  (AirDrop, Messages, Copy…), instead of a panel first.
+- **Float on iPhone.** The floating video is now started from the tap on Join, so it is ready
+  when you float. In the home screen app, where Apple doesn't allow floating, the button
+  says so and points to Safari instead of failing.
+- **Connection log.** A new link's states are recorded from its first moment, to pin down
+  links that open and close again in a loop.
+
 ## v1.13.0
 
 - **Sharing sends the page.** Share now hands over the link itself rather than a text that
