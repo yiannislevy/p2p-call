@@ -130,9 +130,7 @@ h2 { font-size: 28px; font-weight: 650; letter-spacing: -.02em; margin-top: 6px;
 }
 .tile { position: relative; background: #1b1b1a; border-radius: 14px; overflow: hidden; min-width: 0; min-height: 0; }
 #grid[data-n="1"] .tile { border-radius: 0; }
-.tile video { width: 100%; height: 100%; object-fit: cover; display: block; transform-origin: center; }
-/* pinch to zoom inside a tile; the page itself doesn't zoom or scroll under the fingers */
-#grid .tile:not(.me):not(.as-pip) { touch-action: none; }
+.tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tile.fit video { object-fit: contain; }
 .tile .ph { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: #1b1b1a; }
 .avatar { width: 76px; height: 76px; border-radius: 50%; background: #34332f; display: grid; place-items: center; font-size: 32px; font-weight: 600; color: #f2f1ed; }
@@ -189,8 +187,10 @@ h2 { font-size: 28px; font-weight: 650; letter-spacing: -.02em; margin-top: 6px;
 .ctl.end .ring { background: #c5372c; }
 .ctl:disabled { opacity: .4; }
 .ctl.active .ring { background: #f2f1ed; color: #111; }
-/* the video that floats over other apps: kept playing, but not shown on the call screen */
-#floatVideo { position: absolute; left: 0; bottom: 0; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+/* The video that floats over other apps. iPhones pause (and won't float) a video they
+   consider invisible, so it is a real, visible video, just tucked behind everything else. */
+#floatVideo { position: absolute; left: calc(var(--sl) + 14px); top: calc(var(--st) + 72px); width: 120px; height: 90px; z-index: -1; pointer-events: none; }
+#call { isolation: isolate; }
 
 /* toasts */
 #toasts {
@@ -292,3 +292,13 @@ body[data-screen="call"] #toasts { top: calc(var(--st) + 70px); bottom: auto; }
 /* a link that wobbles: the picture may freeze for a moment */
 .weak-badge { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 5px 12px; border-radius: 14px; background: rgba(0, 0, 0, .6); color: #f2f1ed; font-size: 13px; pointer-events: none; white-space: nowrap; }
 #grid[data-n="1"] .weak-badge { top: calc(var(--st, 0px) + 64px); }
+
+/* camera zoom: a button above the bar, and a wheel like the iPhone camera's */
+#zoomCtl { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--sb) + 104px); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+#zoomBtn { min-width: 44px; height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid rgba(255, 255, 255, .25); background: rgba(0, 0, 0, .55); color: #f5d26b; font: inherit; font-size: 14px; font-weight: 600; }
+#zoomDial { position: relative; width: min(92vw, 360px); height: 92px; padding: 6px 10px 4px; box-sizing: border-box; border-radius: 42px 42px 16px 16px; background: rgba(0, 0, 0, .62); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); touch-action: none; cursor: grab; overflow: hidden; }
+#zoomArc { width: 100%; height: 100%; display: block; overflow: hidden; }
+#zoomArc line { stroke: rgba(255, 255, 255, .55); stroke-width: 1.4; }
+#zoomArc line.big { stroke: #fff; stroke-width: 2; }
+#zoomArc text { fill: #fff; font-size: 12px; font-weight: 600; text-anchor: middle; cursor: pointer; }
+.zoom-mark { position: absolute; left: 50%; top: 4px; width: 2px; height: 18px; margin-left: -1px; background: #f5d26b; border-radius: 1px; pointer-events: none; }

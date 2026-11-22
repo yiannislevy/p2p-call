@@ -168,6 +168,13 @@
     </div>
   </div>
   <video id="floatVideo" muted autoplay playsinline aria-hidden="true"></video>
+  <div id="zoomCtl" hidden>
+    <div id="zoomDial" hidden>
+      <svg id="zoomArc" viewBox="-170 -14 340 70" aria-hidden="true"></svg>
+      <span class="zoom-mark" aria-hidden="true"></span>
+    </div>
+    <button id="zoomBtn" type="button" aria-label="Camera zoom" title="Camera zoom">1×</button>
+  </div>
   <nav id="bar">
     <button class="ctl" id="cMic" type="button" title="Mute or unmute (M)"><span class="ring"><svg class="ic on"><use href="#i-mic"/></svg><svg class="ic off"><use href="#i-mic-off"/></svg></span><span class="lb">Mute</span></button>
     <button class="ctl" id="cCam" type="button" title="Camera on or off (V)"><span class="ring"><svg class="ic on"><use href="#i-cam"/></svg><svg class="ic off"><use href="#i-cam-off"/></svg></span><span class="lb">Camera</span></button>

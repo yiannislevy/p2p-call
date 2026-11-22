@@ -48,20 +48,22 @@ test('the floating video shows whoever is talking, and a card when their camera 
   await a.context.close(); await b.context.close(); await c.context.close();
 });
 
+// Stand in for a browser with floating windows (headless ones have none).
+const fakeFloating = () => {
+  window.__floated = 0;
+  Object.defineProperty(Document.prototype, 'pictureInPictureEnabled', { configurable: true, get: () => true });
+  let el = null;
+  Object.defineProperty(Document.prototype, 'pictureInPictureElement', { configurable: true, get: () => el });
+  HTMLVideoElement.prototype.requestPictureInPicture = function () {
+    if (this.readyState < 1) return Promise.reject(new DOMException('not ready', 'InvalidStateError'));
+    el = this; window.__floated++; this.dispatchEvent(new Event('enterpictureinpicture')); return Promise.resolve({});
+  };
+  Document.prototype.exitPictureInPicture = function () { const v = el; el = null; v && v.dispatchEvent(new Event('leavepictureinpicture')); return Promise.resolve(); };
+};
+
 test('the Float button floats the video where the browser can, and P does the same', async ({ browser }) => {
   const a = await person(browser), b = await person(browser);
-  // Stand in for a browser with floating windows (headless ones have none).
-  await a.page.addInitScript(() => {
-    window.__floated = 0;
-    Object.defineProperty(Document.prototype, 'pictureInPictureEnabled', { configurable: true, get: () => true });
-    let el = null;
-    Object.defineProperty(Document.prototype, 'pictureInPictureElement', { configurable: true, get: () => el });
-    HTMLVideoElement.prototype.requestPictureInPicture = function () {
-      if (this.readyState < 1) return Promise.reject(new DOMException('not ready', 'InvalidStateError'));
-      el = this; window.__floated++; this.dispatchEvent(new Event('enterpictureinpicture')); return Promise.resolve({});
-    };
-    Document.prototype.exitPictureInPicture = function () { const v = el; el = null; v && v.dispatchEvent(new Event('leavepictureinpicture')); return Promise.resolve(); };
-  });
+  await a.page.addInitScript(fakeFloating);
   const link = await createRoom(a.page, 'alpha');
   await joinFromHome(a.page, 'alpha', 'Peer C');
   await expect(a.page.locator('#cFloat')).toBeVisible();
@@ -81,6 +83,28 @@ test('the Float button floats the video where the browser can, and P does the sa
   await expect(a.page.locator('#cFloat .lb')).toHaveText('Floating');
   await a.page.click('#cLeave');
   expect(await a.page.evaluate(() => document.pictureInPictureElement)).toBe(null);
+  expectClean(a, b);
+  await a.context.close(); await b.context.close();
+});
+
+// iPhones can hold back a video they consider hidden; then the talker's own tile floats.
+test('if the hidden floating video is not ready, the person\'s own video floats instead', async ({ browser }) => {
+  const a = await person(browser), b = await person(browser);
+  await a.page.addInitScript(fakeFloating);
+  await a.page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      Object.defineProperty(document.getElementById('floatVideo'), 'readyState', { get: () => 0 });
+    });
+  });
+  const link = await createRoom(a.page, 'alpha');
+  await joinFromHome(a.page, 'alpha', 'Peer C');
+  await joinFromLink(b.page, link, 'Peer B');
+  await playingVideos(a.page).toBe(1);
+  await a.page.click('#cFloat');
+  await expect(a.page.locator('#cFloat .lb')).toHaveText('Floating');
+  expect(await a.page.evaluate(() => document.pictureInPictureElement && document.pictureInPictureElement.closest('#grid .tile') !== null)).toBe(true);
+  await a.page.click('#cFloat');
+  await expect(a.page.locator('#cFloat .lb')).toHaveText('Float');
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });

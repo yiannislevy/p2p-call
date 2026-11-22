@@ -1,54 +1,64 @@
 import { test, expect } from '@playwright/test';
 import { person, createRoom, joinFromHome, joinFromLink, playingVideos, expectClean } from './helpers.js';
 
-// Pinch to zoom into someone's video, move around while zoomed, double tap to zoom out.
+// Camera zoom: a button above the bar and a wheel, zooming the camera itself (where the
+// camera can zoom; the test camera can't, so a zoomable camera is simulated).
 
-const touch = (page, type, id, x, y) => page.evaluate(({ type, id, x, y }) => {
-  const tile = document.querySelector('#grid .tile');
-  tile.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, isPrimary: id === 1 }));
-}, { type, id, x, y });
-const zoomOf = page => page.evaluate(() => document.querySelector('#grid .tile video').style.transform);
+const zoomableCamera = () => {
+  window.__zooms = [];
+  const caps = MediaStreamTrack.prototype.getCapabilities;
+  MediaStreamTrack.prototype.getCapabilities = function () {
+    const c = caps ? caps.call(this) : {};
+    return this.kind === 'video' ? { ...c, zoom: { min: 1, max: 10, step: 0.1 } } : c;
+  };
+  const apply = MediaStreamTrack.prototype.applyConstraints;
+  MediaStreamTrack.prototype.applyConstraints = function (c) {
+    const z = c && c.advanced && c.advanced[0] && c.advanced[0].zoom;
+    if (z != null) { window.__zooms.push(z); return Promise.resolve(); }
+    return apply.call(this, c);
+  };
+};
 
-test('pinch zooms into a video, one finger moves it, double tap zooms back out', async ({ browser }) => {
+test('the zoom wheel zooms the camera, stays in range, and taps jump to a stop', async ({ browser }) => {
   const a = await person(browser), b = await person(browser);
+  await a.page.addInitScript(zoomableCamera);
   const link = await createRoom(a.page, 'alpha');
   await joinFromHome(a.page, 'alpha', 'Peer C');
   await joinFromLink(b.page, link, 'Peer B');
   await playingVideos(a.page).toBe(1);
 
-  // Two fingers 100 px apart spread to 200 px: twice as big.
-  await touch(a.page, 'pointerdown', 1, 145, 400);
-  await touch(a.page, 'pointerdown', 2, 245, 400);
-  await touch(a.page, 'pointermove', 1, 95, 400);
-  await touch(a.page, 'pointermove', 2, 295, 400);
-  await touch(a.page, 'pointerup', 2, 295, 400);
-  await touch(a.page, 'pointerup', 1, 95, 400);
-  expect(await zoomOf(a.page)).toMatch(/scale\(2\)/);
+  await expect(a.page.locator('#zoomBtn')).toBeVisible();
+  await expect(a.page.locator('#zoomBtn')).toHaveText('1×');
+  await expect(b.page.locator('#zoomBtn')).toBeHidden();          // a camera that can't zoom: no button
 
-  // Spreading further stops at 4x.
-  await touch(a.page, 'pointerdown', 1, 145, 400);
-  await touch(a.page, 'pointerdown', 2, 245, 400);
-  await touch(a.page, 'pointermove', 2, 845, 400);
-  await touch(a.page, 'pointerup', 2, 845, 400);
-  await touch(a.page, 'pointerup', 1, 145, 400);
-  expect(await zoomOf(a.page)).toMatch(/scale\(4\)/);
+  await a.page.click('#zoomBtn');
+  await expect(a.page.locator('#zoomDial')).toBeVisible();
+  // Turn the wheel: drag left to zoom in.
+  const box = await a.page.locator('#zoomDial').boundingBox();
+  const y = box.y + box.height / 2;
+  await a.page.mouse.move(box.x + box.width * 0.8, y);
+  await a.page.mouse.down();
+  await a.page.mouse.move(box.x + box.width * 0.5, y, { steps: 8 });
+  await a.page.mouse.up();
+  await expect.poll(() => a.page.evaluate(() => window.__zooms.at(-1) || 0)).toBeGreaterThan(1.2);
+  await expect(a.page.locator('#zoomBtn')).not.toHaveText('1×');
 
-  // One finger moves the zoomed picture.
-  const before = await zoomOf(a.page);
-  await touch(a.page, 'pointerdown', 3, 200, 400);
-  await touch(a.page, 'pointermove', 3, 260, 440);
-  await touch(a.page, 'pointerup', 3, 260, 440);
-  expect(await zoomOf(a.page)).not.toBe(before);
+  // Way too far: stops at the camera's maximum.
+  await a.page.mouse.move(box.x + box.width * 0.95, y);
+  await a.page.mouse.down();
+  await a.page.mouse.move(box.x - 2000, y, { steps: 10 });
+  await a.page.mouse.up();
+  await expect.poll(() => a.page.evaluate(() => window.__zooms.at(-1))).toBe(10);
+  expect(await a.page.evaluate(() => Math.max(...window.__zooms))).toBeLessThanOrEqual(10);
 
-  // Double tap: back to normal, without switching to "fit".
-  for (let i = 0; i < 2; i++) { await touch(a.page, 'pointerdown', 4, 200, 400); await touch(a.page, 'pointerup', 4, 200, 400); }
-  expect(await zoomOf(a.page)).toBe('');
-  expect(await a.page.evaluate(() => document.querySelector('#grid .tile').classList.contains('fit'))).toBe(false);
+  // Tapping a stop jumps there.
+  await a.page.locator('#zoomArc text', { hasText: /^2×$/ }).dispatchEvent('click');
+  await expect.poll(() => a.page.evaluate(() => window.__zooms.at(-1))).toBe(2);
+  await expect(a.page.locator('#zoomBtn')).toHaveText('2×');
 
-  // Not zoomed: double tap still switches between filling the tile and the whole picture.
-  await a.page.waitForTimeout(400);
-  for (let i = 0; i < 2; i++) { await touch(a.page, 'pointerdown', 5, 200, 400); await touch(a.page, 'pointerup', 5, 200, 400); }
-  expect(await a.page.evaluate(() => document.querySelector('#grid .tile').classList.contains('fit'))).toBe(true);
+  // Leaving the call hides it.
+  await a.page.click('#cLeave');
+  await expect(a.page.locator('#zoomCtl')).toBeHidden();
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });

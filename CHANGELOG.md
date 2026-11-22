@@ -3,6 +3,18 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.12.0
+
+- **Camera zoom, like FaceTime and the iPhone camera.** A button above the bar shows the zoom
+  (1×); tap it for a wheel to turn with one finger, with stops (1×, 2×, 5×…) to tap. It
+  zooms the camera itself, so the others see it too. It shows where the camera can zoom
+  (phones; most laptop cameras can't) and never goes outside the range the camera reports.
+- **Pinch to zoom is gone.** In a web app the pinch zoomed the whole page instead.
+- **Float on iPhone.** iPhones hold back a video they consider hidden, and the floating
+  video was hidden, so floating failed there. It is now a real video tucked behind the first
+  tile, and if it still isn't ready, the talker's own video floats instead. A failure is
+  noted in the connection log with its reason.
+
 ## v1.11.0
 
 - **Data saver.** Much lighter video (about 480p) to spare mobile data plans, for what you

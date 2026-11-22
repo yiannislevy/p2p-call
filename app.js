@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -648,6 +648,7 @@ function applyToggles() {
   setToggle($('cMic'), !micOn || !a, !!a, micL);
   setToggle($('pCam'), !camOn || !v, !!v, camL);
   setToggle($('cCam'), !camOn || !v, !!v, camL);
+  refreshZoom();
   $('previewOff').hidden = !!(v && camOn);
   $('previewOff').textContent = v ? 'Camera is off' : (local ? 'No camera' : 'Starting camera…');
   $('self').classList.toggle('cam-off', !(v && camOn));
@@ -1672,85 +1673,13 @@ function makeTile() {
   weak.hidden = true;
   root.append(video, ph, tag, weak);
   root.addEventListener('click', () => { if (root.classList.contains('as-pip')) unswap(); });
-  pinchZoom(root, video);
-  return { root, video, ph, avatar, status, name, weak };
-}
-
-/* Pinch to zoom into someone's video, like FaceTime: two fingers zoom (up to 4x), one finger
-   moves around while zoomed, double tap zooms back out (or, when not zoomed, switches between
-   filling the tile and showing the whole picture). */
-const ZOOM_MAX = 4;
-function pinchZoom(root, video) {
-  const z = video.__zoom = { s: 1, x: 0, y: 0 };
-  const pts = new Map();
-  let start = null, pan = null, moved = false, lastTap = 0;
-  const usable = () => !root.classList.contains('as-pip') && !root.classList.contains('me');
-  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-  const apply = () => {
-    const w = root.clientWidth, h = root.clientHeight;
-    const mx = (z.s - 1) * w / 2, my = (z.s - 1) * h / 2;   // keep the picture covering the tile
-    z.x = Math.max(-mx, Math.min(mx, z.x));
-    z.y = Math.max(-my, Math.min(my, z.y));
-    video.style.transform = z.s > 1 ? `translate(${z.x}px, ${z.y}px) scale(${z.s})` : '';
-    root.classList.toggle('zoomed', z.s > 1);
-  };
-  root.addEventListener('pointerdown', e => {
-    if (e.pointerType !== 'touch' || !usable()) return;
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    moved = false;
-    if (pts.size === 2) {
-      const [a, b] = [...pts.values()];
-      start = { d: dist(a, b) || 1, m: mid(a, b), s: z.s, x: z.x, y: z.y };
-      pan = null;
-    } else if (pts.size === 1) pan = { x: e.clientX, y: e.clientY, ox: z.x, oy: z.y };
-  });
-  root.addEventListener('pointermove', e => {
-    if (!pts.has(e.pointerId)) return;
-    const p0 = pts.get(e.pointerId);
-    if (Math.hypot(e.clientX - p0.x, e.clientY - p0.y) > 8) moved = true;
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pts.size === 2 && start) {
-      const [a, b] = [...pts.values()];
-      const m = mid(a, b);
-      z.s = Math.max(1, Math.min(ZOOM_MAX, start.s * dist(a, b) / start.d));
-      const k = z.s / start.s;
-      z.x = start.x * k + (m.x - start.m.x);
-      z.y = start.y * k + (m.y - start.m.y);
-      apply();
-    } else if (pts.size === 1 && pan && z.s > 1) {
-      z.x = pan.ox + (e.clientX - pan.x);
-      z.y = pan.oy + (e.clientY - pan.y);
-      apply();
-    }
-  });
-  const up = e => {
-    if (!pts.has(e.pointerId)) return;
-    const wasPinch = pts.size > 1 || start;
-    pts.delete(e.pointerId);
-    if (pts.size < 2) start = null;
-    if (pts.size === 1) { const [p] = [...pts.values()]; pan = { x: p.x, y: p.y, ox: z.x, oy: z.y }; }
-    if (z.s < 1.05 && z.s !== 1) { z.s = 1; z.x = z.y = 0; apply(); }
-    if (wasPinch || moved || e.type === 'pointercancel') { lastTap = 0; return; }
+  // Double tap: switch between filling the tile and showing the whole picture.
+  let last = 0;
+  root.addEventListener('pointerup', () => {
     const now = Date.now();
-    if (now - lastTap < 320) {                // double tap
-      lastTap = 0;
-      if (z.s > 1) { z.s = 1; z.x = z.y = 0; apply(); } else root.classList.toggle('fit');
-    } else lastTap = now;
-  };
-  root.addEventListener('pointerup', up);
-  root.addEventListener('pointercancel', up);
-  // Mouse and pen: double click as before.
-  let lastType = '';
-  root.addEventListener('pointerdown', e => { lastType = e.pointerType; }, true);
-  root.addEventListener('dblclick', () => { if (lastType === 'touch') return; if (z.s > 1) { z.s = 1; z.x = z.y = 0; apply(); } else root.classList.toggle('fit'); });
-}
-function resetZoom(video) {
-  const z = video && video.__zoom;
-  if (!z) return;
-  z.s = 1; z.x = z.y = 0;
-  video.style.transform = '';
-  video.parentElement && video.parentElement.classList.remove('zoomed');
+    if (now - last < 320) { root.classList.toggle('fit'); last = 0; } else last = now;
+  });
+  return { root, video, ph, avatar, status, name, weak };
 }
 
 function renderTile(p) {
@@ -1774,7 +1703,8 @@ function layout() {
   $('grid').dataset.n = String(Math.min(n, 5));
   $('self').classList.toggle('full', n === 0);
   $('alone').hidden = n > 0 || !inCall;
-  if (inCall) updateFloat();
+  if (inCall) { updateFloat(); refreshZoom(); }
+  floatVideo.style.visibility = n || isFloating() ? '' : 'hidden';   // tucked behind the first tile
   updateMeta();
   renderDetails();
 }
@@ -1803,7 +1733,6 @@ function swapView() {
 
 function unswap() {
   if (!swapped) return;
-  for (const v of document.querySelectorAll('#grid .tile video')) resetZoom(v);
   const { me, other } = swapped;
   swapped = null;
   $('call').classList.remove('swapped');
@@ -1817,6 +1746,109 @@ function unswap() {
 
 $('self').addEventListener('click', swapView);
 
+/* Camera zoom, like FaceTime and the iPhone camera: a button above the bar shows the zoom
+   (1×); tapping it opens a wheel to turn with one finger, with the usual stops (1×, 2×, 5×…)
+   to tap. It zooms the camera itself, so the others see it too. Only where the camera can
+   zoom (phones; most laptop cameras can't), always within the range the camera reports. */
+const ZOOM_DEG = 22;          // degrees of wheel per doubling of the zoom
+const ZOOM_R = 420;           // radius of the wheel, in its own units
+const zoomState = { min: 1, max: 1, step: 0.1, value: 1, track: null, pending: 0, hideAt: 0 };
+const zoomAngle = z => ZOOM_DEG * Math.log2(z / zoomState.min);
+const zoomFromAngle = a => zoomState.min * Math.pow(2, a / ZOOM_DEG);
+const fmtZoom = z => (Math.abs(z - Math.round(z)) < 0.05 ? String(Math.round(z)) : z.toFixed(1)) + '×';
+
+function refreshZoom() {
+  const t = local && local.getVideoTracks()[0];
+  let caps = null;
+  try { caps = t && t.getCapabilities ? t.getCapabilities() : null; } catch {}
+  const z = caps && caps.zoom;
+  const ok = !!(inCall && camOn && t && t.readyState === 'live' && z && z.max > z.min);
+  $('zoomCtl').hidden = !ok;
+  if (!ok) { $('zoomDial').hidden = true; return; }
+  if (zoomState.track === t) return;
+  zoomState.track = t;
+  zoomState.min = z.min; zoomState.max = z.max; zoomState.step = z.step || 0.1;
+  let now = z.min;
+  try { now = t.getSettings().zoom || z.min; } catch {}
+  zoomState.value = Math.min(z.max, Math.max(z.min, now));
+  drawZoomArc();
+  showZoom();
+}
+function drawZoomArc() {
+  const svg = $('zoomArc');
+  const ns = 'http://www.w3.org/2000/svg';
+  const g = document.createElementNS(ns, 'g');
+  g.id = 'zoomTicks';
+  const at = (a, r) => [r * Math.sin(a * Math.PI / 180), ZOOM_R - r * Math.cos(a * Math.PI / 180)];
+  const end = zoomAngle(zoomState.max);
+  for (let a = 0; a <= end + 0.01; a += ZOOM_DEG / 8) {
+    const [x1, y1] = at(a, ZOOM_R), [x2, y2] = at(a, ZOOM_R - 7);
+    const l = document.createElementNS(ns, 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    g.append(l);
+  }
+  for (const stop of [0.5, 1, 2, 3, 5, 10, 15, 20]) {
+    if (stop < zoomState.min - 1e-6 || stop > zoomState.max + 1e-6) continue;
+    const a = zoomAngle(stop);
+    const [x1, y1] = at(a, ZOOM_R), [x2, y2] = at(a, ZOOM_R - 12);
+    const l = document.createElementNS(ns, 'line');
+    l.setAttribute('class', 'big');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    const [tx, ty] = at(a, ZOOM_R - 28);
+    const tl = document.createElementNS(ns, 'text');
+    tl.setAttribute('x', tx); tl.setAttribute('y', ty + 4);
+    tl.setAttribute('transform', `rotate(${a} ${tx} ${ty})`);
+    tl.textContent = fmtZoom(stop);
+    tl.addEventListener('click', e => { e.stopPropagation(); setZoom(stop); });
+    g.append(l, tl);
+  }
+  svg.replaceChildren(g);
+}
+function showZoom() {
+  $('zoomBtn').textContent = fmtZoom(zoomState.value);
+  const g = $('zoomTicks');
+  if (g) g.setAttribute('transform', `rotate(${-zoomAngle(zoomState.value)} 0 ${ZOOM_R})`);
+}
+function setZoom(z) {
+  zoomState.value = Math.min(zoomState.max, Math.max(zoomState.min, Math.round(z / zoomState.step) * zoomState.step));
+  showZoom();
+  keepZoomOpen();
+  if (zoomState.pending) return;
+  zoomState.pending = setTimeout(() => {
+    zoomState.pending = 0;
+    const t = zoomState.track;
+    // Never outside the reported range (an out-of-range zoom has crashed Safari's camera).
+    const v = Math.min(zoomState.max, Math.max(zoomState.min, zoomState.value));
+    if (t && t.readyState === 'live') t.applyConstraints({ advanced: [{ zoom: v }] }).catch(() => {});
+  }, 80);
+}
+function keepZoomOpen() { zoomState.hideAt = Date.now() + 3500; }
+setInterval(() => { if (!$('zoomDial').hidden && Date.now() > zoomState.hideAt) $('zoomDial').hidden = true; }, 500);
+$('zoomBtn').addEventListener('click', () => {
+  const d = $('zoomDial');
+  d.hidden = !d.hidden;
+  if (!d.hidden) { keepZoomOpen(); showZoom(); }
+});
+{
+  // Turning the wheel: the ticks follow the finger.
+  let drag = null;
+  const dial = $('zoomDial');
+  dial.addEventListener('pointerdown', e => {
+    if (e.target.tagName === 'text') return;
+    drag = { x: e.clientX, a: zoomAngle(zoomState.value), scale: 340 / dial.clientWidth };
+    try { dial.setPointerCapture(e.pointerId); } catch {}
+    keepZoomOpen();
+  });
+  dial.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = (e.clientX - drag.x) * drag.scale;            // in the wheel's own units
+    setZoom(zoomFromAngle(drag.a - dx * 180 / (Math.PI * ZOOM_R)));
+  });
+  const stop = () => { drag = null; };
+  dial.addEventListener('pointerup', stop);
+  dial.addEventListener('pointercancel', stop);
+}
+
 /* floating video (picture-in-picture): the person talking, in a small window that stays over
    other apps, like FaceTime. One video element is kept playing for it during the call (iOS
    only floats a video that is already playing); it shows whoever is talking, switching
@@ -1828,7 +1860,8 @@ let floatTarget = null, floatSince = 0;
 
 const canFloat = () => !!(floatVideo.requestPictureInPicture && document.pictureInPictureEnabled) ||
   typeof floatVideo.webkitSetPresentationMode === 'function';
-const isFloating = () => document.pictureInPictureElement === floatVideo || floatVideo.webkitPresentationMode === 'picture-in-picture';
+const isFloating = () => !!document.pictureInPictureElement || floatVideo.webkitPresentationMode === 'picture-in-picture' ||
+  [...document.querySelectorAll('#grid video')].some(v => v.webkitPresentationMode === 'picture-in-picture');
 
 function pickFloatTarget() {
   const list = [...people.values()].filter(p => !p.leaving);
@@ -1890,23 +1923,32 @@ async function toggleFloat() {
   try {
     if (isFloating()) {
       if (document.pictureInPictureElement) await document.exitPictureInPicture();
-      else floatVideo.webkitSetPresentationMode('inline');
+      else for (const v of [floatVideo, ...document.querySelectorAll('#grid video')]) if (v.webkitPresentationMode === 'picture-in-picture') v.webkitSetPresentationMode('inline');
       return;
     }
     updateFloat();
+    floatVideo.play().catch(() => {});
+    // The hidden video isn't ready (iPhones may hold it back): float the person's own tile.
+    const target = floatVideo.readyState >= 2 ? floatVideo
+      : (floatTarget && floatTarget.ui.video.readyState >= 2 ? floatTarget.ui.video : floatVideo);
+    log('FLOAT', target === floatVideo ? 'following the talker' : 'their own video', `(ready ${floatVideo.readyState})`);
     // No waiting before this call: iOS only allows it straight from the tap.
-    if (floatVideo.requestPictureInPicture && document.pictureInPictureEnabled) await floatVideo.requestPictureInPicture();
-    else floatVideo.webkitSetPresentationMode('picture-in-picture');
-  } catch {
-    toast('The video can\'t float right now. Try again in a moment.');
+    if (target.requestPictureInPicture && document.pictureInPictureEnabled) await target.requestPictureInPicture();
+    else target.webkitSetPresentationMode('picture-in-picture');
+  } catch (e) {
+    log('FLOAT failed', e && e.name, e && e.message ? String(e.message).slice(0, 80) : '');
+    toast(`The video can't float right now (${(e && e.name) || 'refused'}). Try again in a moment.`);
   }
 }
 
 function endFloat() {
-  try { if (document.pictureInPictureElement === floatVideo) document.exitPictureInPicture().catch(() => {}); } catch {}
+  try { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); } catch {}
   try { if (floatVideo.webkitPresentationMode === 'picture-in-picture') floatVideo.webkitSetPresentationMode('inline'); } catch {}
   floatVideo.srcObject = null;
   floatTarget = null;
+  $('zoomCtl').hidden = true;
+  $('zoomDial').hidden = true;
+  zoomState.track = null;
   $('cFloat').hidden = true;
   $('cFloat').classList.remove('active');
 }
@@ -1917,9 +1959,9 @@ const floatChanged = () => {
   $('cFloat').querySelector('.lb').textContent = on ? 'Floating' : 'Float';
   $('cFloat').setAttribute('aria-pressed', String(on));
 };
-floatVideo.addEventListener('enterpictureinpicture', floatChanged);
-floatVideo.addEventListener('leavepictureinpicture', floatChanged);
-floatVideo.addEventListener('webkitpresentationmodechanged', floatChanged);
+for (const ev of ['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged']) {
+  document.addEventListener(ev, floatChanged, true);   // the hidden video or a tile's
+}
 $('cFloat').addEventListener('click', toggleFloat);
 
 /* keyboard (computers): M mute, V camera, P float, S swap, I invite, D details, Esc close */
