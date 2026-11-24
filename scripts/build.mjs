@@ -29,7 +29,7 @@ const FAST = {
 };
 
 // Everything the site needs: top-level page files plus vendor/. Tooling is left out.
-const isSiteFile = f => /\.(html|js|css|webmanifest|png)$/.test(f) && !/^(playwright\.config)\.js$/.test(f);
+const isSiteFile = f => /\.(html|js|css|webmanifest|png|svg)$/.test(f) && !/^(playwright\.config)\.js$/.test(f);
 
 let src = '.';
 let tmp = '';
@@ -86,7 +86,14 @@ if (fastTimers) {
   if (files.includes('presence.js')) writeFileSync(join(out, 'presence.js'), speedUp('presence.js', readFileSync(join(out, 'presence.js'), 'utf8')));
 }
 
-writeFileSync(join(out, 'app.js'), app);
+// Comments are for people reading the source; the served files leave them out. Only whole-line
+// comments are dropped (never anything after code on the same line), which keeps it safe.
+const dropComments = js => js.replace(/^[ \t]*\/\*[\s\S]*?\*\/[ \t]*\n/gm, '').replace(/^[ \t]*\/\/.*\n/gm, '');
+writeFileSync(join(out, 'app.js'), dropComments(app));
+for (const f of files.filter(f => f.endsWith('.js') && f !== 'app.js')) writeFileSync(join(out, f), dropComments(readFileSync(join(out, f), 'utf8')));
+html = html.replace(/<!--[\s\S]*?-->\n?/g, '');
+writeFileSync(join(out, 'style.css'), readFileSync(join(out, 'style.css'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s*([{};,>])\s*/g, '$1').replace(/:\s+/g, ':').replace(/;}/g, '}').replace(/\s{2,}/g, ' ').trim());
 writeFileSync(join(out, 'index.html'), html);
 if (tmp) rmSync(tmp, { recursive: true, force: true });
 console.log(`Built version ${version}${ref ? ` from ${ref}` : ''} into ${out}${relay ? ` (test relay ${relay})` : ''}`);

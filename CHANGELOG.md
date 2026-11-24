@@ -3,6 +3,21 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.15.0
+
+- **New look, step 1 of 5: the foundations.** Every colour, type size and corner now comes
+  from one set of design tokens: cool greys, graphite for main buttons, teal only for live
+  things (who is in a call, who is talking), red only for leaving and errors. Light and dark
+  both follow the phone's setting, and every text colour meets the WCAG AA contrast level.
+- **New logo and icons.** Two overlapping call windows, one for each person. New app icons
+  for the home screen, a sharp favicon in the browser tab that follows light and dark, and a
+  redrawn, lighter icon set.
+- **Calmer controls.** Lighter type (two weights only), hairline outlines, soft glass chips
+  over video, an outlined Leave button instead of a red disc, and consistent hover, press and
+  keyboard-focus states everywhere. All motion stops when Reduce Motion is on.
+- **Lighter page.** Comments are left out of the served files, so the page downloads less
+  than before (about 43 KB compressed instead of 49 KB), new icons included.
+
 ## v1.14.0
 
 - **Copy diagnostics.** A small "Problem? Copy diagnostics" link under the room's name copies

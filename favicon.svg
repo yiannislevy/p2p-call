@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>.m{fill:#25282C;stroke:#25282C}@media (prefers-color-scheme:dark){.m{fill:#E6E7E9;stroke:#E6E7E9}}</style>
+  <mask id="cut"><rect width="24" height="24" fill="#fff"/><rect x="3.875" y="7.375" width="14.25" height="13.25" rx="4.625" fill="#000"/></mask>
+  <rect class="m" x="1" y="4" width="13" height="11" rx="3.5" stroke="none" mask="url(#cut)"/>
+  <rect class="m" x="5" y="8.5" width="12" height="11" rx="3.5" stroke="none"/>
+  <path class="m" d="M19.4 14L22.8 11V17Z" stroke-width="1.4" stroke-linejoin="round"/>
+</svg>

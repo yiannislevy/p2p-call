@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.14.0';
+const VERSION = '1.15.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -255,7 +255,7 @@ function renderHome() {
     const inv = el('button', 'icon-btn');
     inv.type = 'button';
     inv.setAttribute('aria-label', 'Invite people to ' + shownName(r));
-    inv.append(icon('share'));
+    inv.append(icon('invite'));
     inv.addEventListener('click', () => invite(r));
     li.append(main, faces, inv);
     list.append(li);
