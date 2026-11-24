@@ -3,6 +3,21 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.18.0
+
+- **New look, step 4 of 5: the call.**
+  - **Four controls** in a frosted bar: microphone, camera, invite, leave (an outlined
+    button). Float moved to the top right; flip camera sits on your own video.
+  - **1-on-1:** their video fills the screen, their name and the call time are in small chips
+    at the top left (the time opens the details), you are small at the top right. Small teal
+    bars beside their name show when they talk.
+  - **Groups:** a header with the room, how many people and how long; a grid of tiles with
+    your own among them, labelled You; a thin teal ring around whoever is talking; initials
+    on a tile whose camera is off.
+  - **Weak connection** shows as a small badge with a signal icon, and that picture dims.
+  - **Reconnecting** keeps the last picture, dimmed, under a calm "Reconnecting…".
+  - The zoom wheel and "Problem? Copy diagnostics" stay, restyled to match.
+
 ## v1.17.0
 
 - **New look, step 3 of 5: before joining.** The room's name sits in the header, with a

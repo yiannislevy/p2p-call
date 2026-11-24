@@ -23,7 +23,7 @@ test('Invite copies the link straight away, and the invitee can join and save th
   await playingVideos(b.page).toBe(1);
 
   // Inviting from inside a call works too.
-  await a.page.click('#topInvite');
+  await a.page.click('#cInvite');
   await expect(a.page.locator('#sheet')).toBeVisible();
   expect(await a.page.inputValue('#sheetLink')).toBe(link);
   await a.page.click('#sheetDone');

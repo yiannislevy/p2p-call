@@ -516,3 +516,138 @@ body[data-screen="call"] #toasts { top: calc(var(--st) + 70px); bottom: auto; }
 .preview-bar { bottom: 16px; gap: 12px; }
 #lobby .actions.bottom { margin-top: 20px; gap: 10px; }
 #lobbyWho { text-align: center; color: var(--text-secondary); font: var(--body); margin: 0; }
+
+/* ---- the call (step 4) ---- */
+.ctl .lb, .glass-btn .lb { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#callTop { background: none; padding: calc(var(--st) + 10px) calc(var(--sr) + 16px) 8px calc(var(--sl) + 16px); align-items: flex-start; }
+.who { min-height: 0; }
+.glass-btn {
+  position: relative; width: 36px; height: 36px; display: grid; place-items: center; flex: none;
+  border-radius: var(--r-control); color: var(--on-video); background: var(--glass);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
+  transition: background-color var(--t-press) var(--ease), transform var(--t-press) var(--ease);
+}
+.glass-btn::after { content: ''; position: absolute; inset: -4px; }
+.glass-btn.active { background: #ECEDEF; color: #17191C; }
+.glass-btn:active { transform: scale(.97); }
+.glass-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--video), 0 0 0 4px #ECEDEF; }
+.glass-btn:disabled { opacity: .45; }
+
+/* the control bar: four controls */
+#bar {
+  left: calc(var(--sl) + 16px); right: calc(var(--sr) + 16px); bottom: calc(var(--sb) + 12px); height: 68px;
+  padding: 0 8px; gap: 0; justify-content: space-around; align-items: center; border-radius: var(--r-sheet);
+  background: var(--glass-bar); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); max-width: 420px; margin: 0 auto;
+}
+.ctl { min-width: 0; width: 44px; height: 44px; gap: 0; justify-content: center; }
+.ctl .ring { width: 44px; height: 44px; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.ctl .ic { width: 22px; height: 22px; }
+.ctl.end { width: 52px; }
+.ctl.end .ring { width: 52px; height: 44px; border-radius: 22px; }
+@media (hover: hover) { .ctl:hover:not(:disabled):not(.is-off):not(.end):not(.active) .ring { background: rgba(255, 255, 255, .08); } }
+#zoomCtl { bottom: calc(var(--sb) + 12px + 68px + 12px); }
+body[data-screen="call"] #toasts { top: calc(var(--st) + 96px); }
+
+/* name chips, talking bars, muted icon */
+.tag { gap: 6px; }
+.tag .bars { display: none; align-items: flex-end; gap: 2px; height: 10px; }
+.tag .bars i { display: block; width: 2px; border-radius: 1px; background: var(--live); animation: talk .9s ease-in-out infinite; }
+.tag .bars i:nth-child(1) { height: 6px; }
+.tag .bars i:nth-child(2) { height: 10px; animation-delay: .15s; }
+.tag .bars i:nth-child(3) { height: 7px; animation-delay: .3s; }
+@keyframes talk { 50% { transform: scaleY(.5); } }
+.tile.speaking:not(.muted) .tag .bars { display: inline-flex; }
+
+/* weak connection: a quiet badge, the picture dimmed */
+.weak-badge { top: 8px; left: 8px; transform: none; display: inline-flex; align-items: center; gap: 6px; font: var(--caption); padding: 4px 8px; }
+.weak-badge .sig { width: 14px; height: 14px; }
+.weak-badge .sig use:last-child { color: var(--control); }
+.tile.weak video { opacity: .55; }
+#grid[data-n="1"] .weak-badge { top: calc(var(--st) + 80px); left: calc(var(--sl) + 16px); }
+
+/* reconnecting: the picture dims under a calm status chip */
+.status-chip {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 5;
+  display: none; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--r-control);
+  background: var(--glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  color: var(--on-video); font: var(--body); white-space: nowrap; pointer-events: none;
+}
+#callReconnecting { display: inline-flex; }
+#callReconnecting[hidden] { display: none; }
+.tile.reconnecting .status-chip { display: inline-flex; }
+.tile.reconnecting .ph-status { display: none; }
+.tile.reconnecting video, #call.reconnecting .tile video { filter: brightness(.44); }
+#call.reconnecting .tile .status-chip { display: none; }
+.spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(236, 237, 239, .3); border-top-color: var(--on-video); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* flip camera: on your own video only */
+.glass-btn.flip { position: absolute; z-index: 4; width: 28px; height: 28px; border-radius: var(--r-chip); }
+.glass-btn.flip::after { inset: -8px; }
+.glass-btn.flip .ic { width: 16px; height: 16px; }
+
+/* 1-on-1: their video fills the screen; name and timer top left; you, small, top right */
+#call.mode-one #grid { padding: 0; }
+#call.mode-one #grid .tile:not(.as-pip) .tag { top: calc(var(--st) + 10px); left: calc(var(--sl) + 16px); bottom: auto; }
+#call.mode-one #callTop { padding-top: calc(var(--st) + 10px + 34px); }
+#call.mode-one #callRoom { display: none; }
+#call.mode-one .who {
+  padding: 4px 8px; border-radius: var(--r-chip); background: var(--glass);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); position: relative;
+}
+#call.mode-one .who::after { content: ''; position: absolute; inset: -6px; }
+#call.mode-one #callMeta { color: var(--on-video); font-size: 13px; }
+#call.mode-one #self, #call.mode-one .tile.as-pip {
+  top: calc(var(--st) + 10px); right: calc(var(--sr) + 16px); bottom: auto;
+  width: 96px; height: 128px; aspect-ratio: auto; border-radius: var(--r-panel);
+  border: 1px solid rgba(255, 255, 255, .14); box-shadow: 0 4px 16px rgba(0, 0, 0, .3);
+}
+#call.mode-one .tile.as-pip .tag { left: 6px; bottom: 6px; }
+#call.mode-one #cFlip { top: calc(var(--st) + 10px + 128px - 34px); right: calc(var(--sr) + 16px + 6px); }
+#call.mode-one.swapped #cFlip { top: auto; right: auto; bottom: calc(var(--sb) + 12px + 68px + 16px); left: calc(var(--sl) + 16px); }
+#call.mode-one #cFloat { position: absolute; top: calc(var(--st) + 10px); right: calc(var(--sr) + 16px + 96px + 8px); }
+@media (orientation: landscape) {
+  #call.mode-one #self, #call.mode-one .tile.as-pip { width: 128px; height: 96px; }
+  #call.mode-one #cFlip { top: calc(var(--st) + 10px + 96px - 34px); }
+  #call.mode-one #cFloat { right: calc(var(--sr) + 16px + 128px + 8px); }
+}
+
+/* alone: your video fills the screen behind "Waiting for others" */
+#call.mode-alone #cFlip { top: calc(var(--st) + 60px); right: calc(var(--sr) + 16px); width: 36px; height: 36px; border-radius: var(--r-control); }
+
+/* group: a header, a grid of tiles with yours among them, a solid bar */
+#call.mode-group { background: var(--video); }
+#call.mode-group #callTop { min-height: calc(var(--st) + 52px); align-items: center; padding-top: calc(var(--st) + 4px); padding-bottom: 4px; }
+#call.mode-group #grid {
+  grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; grid-template-rows: none; gap: 6px;
+  padding: calc(var(--st) + 56px) calc(var(--sr) + 16px) calc(var(--sb) + 12px + 68px + 12px) calc(var(--sl) + 16px);
+}
+#call.mode-group #grid .tile:first-child { grid-column: auto; }
+#call.mode-group #grid[data-n="3"] .tile:last-child, #call.mode-group #grid[data-n="5"] .tile:last-child { grid-column: span 2; }
+#call.mode-group .tile { border-radius: var(--r-panel); }
+#call.mode-group .self-tile #self { position: static; width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; opacity: 1; visibility: visible; z-index: auto; cursor: default; }
+#call.mode-group .self-tile #self.cam-off { visibility: hidden; }
+#call.mode-group .self-tile #cFlip { right: 8px; bottom: 8px; width: 32px; height: 32px; }
+#call.mode-group .self-tile #cFlip::after { inset: -6px; }
+#call.mode-group #bar { background: #17191C; box-shadow: inset 0 0 0 1px var(--tile-line); -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (orientation: landscape) {
+  #call.mode-group #grid { grid-template-columns: repeat(3, 1fr); }
+  #call.mode-group #grid[data-n="3"] .tile:last-child, #call.mode-group #grid[data-n="5"] .tile:last-child { grid-column: auto; }
+  #call.mode-group #grid[data-n="2"], #call.mode-group #grid[data-n="4"] { grid-template-columns: 1fr 1fr; }
+}
+
+/* your own tile in a group: styled like the others */
+.self-tile { position: relative; background: var(--tile); border-radius: var(--r-panel); overflow: hidden; min-width: 0; min-height: 0; }
+.self-tile::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 2px var(--live); opacity: 0; transition: opacity var(--t-press) var(--ease); }
+.self-tile.speaking::after { opacity: 1; }
+.self-tile .tag .ic { width: 16px; height: 16px; display: none; }
+.self-tile.muted .tag .ic { display: block; }
+.self-tile.speaking:not(.muted) .tag .bars { display: inline-flex; }
+#call.mode-group #grid[data-n="3"] > :last-child, #call.mode-group #grid[data-n="5"] > :last-child { grid-column: span 2; }
+@media (orientation: landscape) { #call.mode-group #grid[data-n="3"] > :last-child, #call.mode-group #grid[data-n="5"] > :last-child { grid-column: auto; } }
+#callTop { pointer-events: none; }
+#callTop > * { pointer-events: auto; }
+#call.mode-one #grid .tile::after { display: none; }   /* 1-on-1: the bars in the name chip say who talks */
+#call.mode-group #grid { padding-top: calc(var(--st) + 76px); }
+#call.mode-group #callTop { min-height: calc(var(--st) + 70px); align-items: flex-start; }

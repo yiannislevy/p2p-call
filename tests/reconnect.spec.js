@@ -59,7 +59,7 @@ test('when every link dies, the app rejoins on its own, without "left" or duplic
   await expect(b.page.locator('#callMeta')).toHaveText('Reconnecting…');
   await poll(b.page, n => window.__pcs.slice(n).some(pc => pc.connectionState === 'connected'), before, 60000).toBe(true);
   await poll(b.page, () => window.__toasts.includes('Reconnected'), undefined, 20000).toBe(true);
-  await poll(b.page, () => document.getElementById('callMeta').textContent.includes('people'), undefined, 10000).toBe(true);
+  await poll(b.page, () => /^\d\d:\d\d/.test(document.getElementById('callMeta').textContent), undefined, 10000).toBe(true);
   await playingVideos(b.page).toBe(1);
 
   // Peer C keeps exactly one tile for Peer B, live again, and was never told she left or joined again.
@@ -67,7 +67,7 @@ test('when every link dies, the app rejoins on its own, without "left" or duplic
     const tiles = [...document.querySelectorAll('#grid .tile')];
     return tiles.length === 1 && tiles[0].querySelector('.ph').hidden && tiles[0].querySelector('video').videoWidth > 0;
   }, undefined, 40000).toBe(true);
-  expect(await a.page.locator('#grid .tag span').textContent()).toBe('Peer B');
+  expect(await a.page.locator('#grid .tile .tag span').textContent()).toBe('Peer B');
   const seen = await toasts(a.page);
   expect(seen).not.toContain('Peer B left');
   expect(seen.filter(t => t === 'Peer B joined').length).toBe(1);
@@ -134,7 +134,7 @@ test('in a three-person call, one person dropping and coming back leaves everyon
   const c = await person(browser);
   await c.page.addInitScript(instrument);
   const link = await a.page.inputValue('#sheetLink').catch(() => '');
-  const invite = link || await (async () => { await a.page.click('#topInvite'); const l = await a.page.inputValue('#sheetLink'); await a.page.click('#sheetDone'); return l; })();
+  const invite = link || await (async () => { await a.page.click('#cInvite'); const l = await a.page.inputValue('#sheetLink'); await a.page.click('#sheetDone'); return l; })();
   await joinFromLink(c.page, invite, 'Peer A');
   for (const p of [a, b, c]) await playingVideos(p.page).toBe(2);
 
@@ -144,7 +144,7 @@ test('in a three-person call, one person dropping and coming back leaves everyon
   });
   await poll(b.page, () => window.__toasts.includes('Reconnected'), undefined, 60000).toBe(true);
 
-  const names = page => page.evaluate(() => [...document.querySelectorAll('#grid .tag span')].map(s => s.textContent).sort());
+  const names = page => page.evaluate(() => [...document.querySelectorAll('#grid .tile .tag span')].map(s => s.textContent).sort());
   for (const p of [a, b, c]) await playingVideos(p.page, 40000).toBe(2);
   expect(await names(a.page)).toEqual(['Peer A', 'Peer B']);
   expect(await names(b.page)).toEqual(['Peer A', 'Peer C']);

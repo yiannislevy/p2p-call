@@ -33,7 +33,7 @@ test('in the room for a while with dead introductions: people who join are still
   // Peer C notices they are in the room without him and picks them up.
   await playingVideos(a.page, 90000).toBe(2);
   for (const p of [b, c]) await playingVideos(p.page, 30000).toBe(2);
-  const names = await a.page.evaluate(() => [...document.querySelectorAll('#grid .tag span')].map(s => s.textContent).sort());
+  const names = await a.page.evaluate(() => [...document.querySelectorAll('#grid .tile .tag span')].map(s => s.textContent).sort());
   expect(names).toEqual(['Peer A', 'Peer B']);
 
   expectClean(a, b, c);

@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.17.0';
+const VERSION = '1.18.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -813,6 +813,7 @@ function applyToggles() {
   $('self').classList.toggle('cam-off', !(v && camOn));
   if (!micOn) $('self').classList.remove('speaking');   // never show ourselves talking while muted
   if (swapped) { swapped.me.classList.toggle('muted', !micOn); if (!micOn) swapped.me.classList.remove('speaking'); }
+  if (selfTile) { selfTile.classList.toggle('muted', !micOn); if (!micOn) selfTile.classList.remove('speaking'); }
 }
 
 async function updateFlip() {
@@ -1119,6 +1120,8 @@ function leaveCall() {
   try { wakeLock && wakeLock.release(); } catch {}
   wakeLock = null;
   selfReconnecting = false;
+  $('callReconnecting').hidden = true;
+  $('call').classList.remove('reconnecting');
   $('tapAudio').hidden = true;
   $('toasts').replaceChildren();
   stopMedia();
@@ -1127,7 +1130,7 @@ function leaveCall() {
 
 $('cLeave').addEventListener('click', back);
 $('aloneInvite').addEventListener('click', () => callRoom && invite(callRoom));
-$('topInvite').addEventListener('click', () => callRoom && invite(callRoom));
+$('cInvite').addEventListener('click', () => callRoom && invite(callRoom));
 // Closing or refreshing the page. We can't tell which, so we say "away" rather than "bye":
 // the others show "Reconnecting…" briefly, and drop us after AWAY_GRACE_MS unless we are back.
 addEventListener('pagehide', () => {
@@ -1589,6 +1592,7 @@ async function watchSpeaking() {
     const selfTalking = inCall && micOn && people.size > 0 && Date.now() - selfSpokeAt < SPEAK_HOLD_MS;
     $('self').classList.toggle('speaking', selfTalking);
     if (swapped) swapped.me.classList.toggle('speaking', selfTalking);
+    if (selfTile) selfTile.classList.toggle('speaking', selfTalking);
     updateFloat();
   } catch {} finally {
     speakBusy = false;
@@ -1851,10 +1855,15 @@ function makeTile() {
   ph.append(avatar, status);
   const tag = el('div', 'tag');
   const name = el('span');
-  tag.append(icon('mic-off'), name);
-  const weak = el('div', 'weak-badge', 'Weak connection');
+  tag.append(talkBars(), icon('mic-off'), name);
+  const weak = el('div', 'weak-badge');
+  weak.setAttribute('role', 'status');
+  weak.append(weakIcon(), el('span', '', 'Weak connection'));
   weak.hidden = true;
-  root.append(video, ph, tag, weak);
+  const reco = el('div', 'status-chip');
+  reco.setAttribute('role', 'status');
+  reco.append(el('span', 'spinner'), el('span', '', 'Reconnecting…'));
+  root.append(video, ph, tag, weak, reco);
   root.addEventListener('click', () => { if (root.classList.contains('as-pip')) unswap(); });
   // Double tap: switch between filling the tile and showing the whole picture.
   let last = 0;
@@ -1865,25 +1874,65 @@ function makeTile() {
   return { root, video, ph, avatar, status, name, weak };
 }
 
+// Three small bars before a name while that person talks.
+function talkBars() { const b = el('i', 'bars'); b.setAttribute('aria-hidden', 'true'); b.append(el('i'), el('i'), el('i')); return b; }
+// Signal icon for a wobbly link: two lit bars, two dim.
+function weakIcon() {
+  const s = document.createElementNS(SVG_NS, 'svg');
+  s.setAttribute('class', 'ic sig'); s.setAttribute('aria-hidden', 'true');
+  for (const id of ['i-signal-low', 'i-signal-high']) { const u = document.createElementNS(SVG_NS, 'use'); u.setAttribute('href', '#' + id); s.append(u); }
+  return s;
+}
+
 function renderTile(p) {
   const vt = p.stream && p.stream.getVideoTracks()[0];
   const away = p.bg && p.videoStalled;   // in another app and its camera paused
-  const showVideo = !!(vt && p.cam) && !p.reconnecting && !away;
+  // While a link is being rebuilt the last picture stays, dimmed, under "Reconnecting…".
+  const showVideo = !!(vt && p.cam) && !away && !(p.reconnecting && !p.ui.video.videoWidth);
   p.ui.ph.hidden = showVideo;
-  p.ui.avatar.textContent = (p.name || '?').charAt(0).toUpperCase();
+  p.ui.avatar.textContent = initials(p.name || '?');
   p.ui.status.textContent = p.reconnecting ? 'Reconnecting…' : !p.stream ? 'Connecting…'
     : away ? 'In another app' : (!p.cam || !vt ? 'Camera off' : '');
   p.ui.name.textContent = p.name || '…';
   p.ui.root.classList.toggle('muted', !p.mic);
   p.ui.root.classList.toggle('reconnecting', p.reconnecting);
   p.ui.weak.hidden = !(p.weak && !p.reconnecting && p.peerId);
+  p.ui.root.classList.toggle('weak', !p.ui.weak.hidden);
   if (inCall) updateFloat();
+}
+
+// Three layouts: alone (your video fills the screen), 1-on-1 (theirs fills it, yours small at
+// the top right) and group (a grid of tiles, yours among them, labelled You).
+let selfTile = null;
+function setMode(n) {
+  const mode = n === 0 ? 'alone' : n === 1 ? 'one' : 'group';
+  const call = $('call');
+  for (const m of ['alone', 'one', 'group']) call.classList.toggle('mode-' + m, m === mode);
+  if (mode === 'group' && !selfTile) {
+    if (swapped) unswap();
+    selfTile = el('div', 'self-tile');   // looks like a tile; not one of theirs
+    const tag = el('div', 'tag');
+    tag.append(talkBars(), icon('mic-off'), el('span', '', 'You'));
+    selfTile.append($('self'), tag, $('cFlip'));
+    selfTile.classList.toggle('muted', !micOn);
+    selfTile.addEventListener('click', e => e.stopPropagation());
+  }
+  if (selfTile) {
+    if (mode === 'group') $('grid').append(selfTile);   // always last
+    else {
+      call.insertBefore($('self'), $('alone'));
+      call.insertBefore($('cFlip'), $('alone'));
+      selfTile.remove();
+      selfTile = null;
+    }
+  }
+  $('grid').dataset.n = String(mode === 'group' ? Math.min(n + 1, 6) : n);
 }
 
 function layout() {
   const n = people.size;
   if (swapped && n !== swapped.count) unswap();   // someone joined or left: back to the normal view
-  $('grid').dataset.n = String(Math.min(n, 5));
+  setMode(n);
   $('self').classList.toggle('full', n === 0);
   $('alone').hidden = n > 0 || !inCall;
   if (inCall) { updateFloat(); refreshZoom(); }
@@ -1897,7 +1946,7 @@ function layout() {
 let swapped = null;   // { me: your tile in the grid, other: their tile shown small, count }
 
 function swapView() {
-  if (!inCall || !people.size) return;
+  if (!inCall || people.size !== 1) return;   // only in a 1-on-1: in a group you are one of the tiles
   if (swapped) { unswap(); return; }
   const grid = $('grid');
   const other = grid.firstElementChild;   // the biggest tile
@@ -2171,7 +2220,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'v') $('cCam').click();
   else if (k === 'p') { if (!$('cFloat').hidden) toggleFloat(); }
   else if (k === 's') swapView();
-  else if (k === 'i') $('topInvite').click();
+  else if (k === 'i') $('cInvite').click();
   else if (k === 'd') { if ($('details').hidden) $('whoBtn').click(); else $('details').hidden = true; }
   else return;
   e.preventDefault();
@@ -2180,12 +2229,15 @@ $('detailsKeys').hidden = !matchMedia('(hover: hover) and (pointer: fine)').matc
 
 function updateMeta() {
   if (!inCall) return;
+  $('callReconnecting').hidden = !(selfReconnecting && people.size);
+  $('call').classList.toggle('reconnecting', !!(selfReconnecting && people.size));
   if (selfReconnecting) { $('callMeta').textContent = 'Reconnecting…'; return; }
   const n = people.size;
   if (!n) { $('callMeta').textContent = 'Just you'; return; }
   const s = Math.floor((Date.now() - t0) / 1000);
   const time = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-  $('callMeta').textContent = `${n + 1} people · ${time}` + (saverOn() ? ' · Data saver' : '');
+  // 1-on-1: just the time, in a chip under their name. A group: how many and how long.
+  $('callMeta').textContent = (n === 1 ? time : `${n + 1} people · ${time}`) + (saverOn() ? ' · Data saver' : '');
 }
 
 // Show whether we can reach the relays that introduce people to each other.

@@ -26,7 +26,7 @@ test('room names and people names are only ever shown as text', async ({ browser
   await joinFromLink(b.page, link, 'Bob');
   await playingVideos(b.page).toBe(1);
 
-  await expect(b.page.locator('#grid .tag span')).toHaveText(evilName);
+  await expect(b.page.locator('#grid .tile .tag span')).toHaveText(evilName);
   await expect(a.page.locator('#callRoom')).toHaveText(evilRoom);
   for (const p of [a, b]) expect(await p.page.locator('img, b').count()).toBe(0);
 

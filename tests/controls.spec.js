@@ -45,20 +45,17 @@ test('1-on-1: tapping your own video swaps it with theirs, and tapping again swa
   await a.context.close(); await b.context.close();
 });
 
-test('group: your video takes the big spot, the big one goes small, everything else stays', async ({ browser }) => {
+test('group: your video is one of the tiles, labelled You, and stays put', async ({ browser }) => {
   const { ps: [a, b, c] } = await call(browser, ['Peer C', 'Peer B', 'Peer A']);
-  const before = (await view(a.page)).gridNames;
-  expect(before.length).toBe(2);
+  const before = await view(a.page);
+  expect(before.gridNames.length).toBe(2);
+  expect(before.selfInGrid).toBe(true);
+  expect(await a.page.locator('#grid > .self-tile .tag span').textContent()).toBe('You');
+  expect(await a.page.evaluate(() => document.querySelector('#grid').lastElementChild.classList.contains('self-tile'))).toBe(true);
+  expect(await a.page.evaluate(() => document.getElementById('grid').dataset.n)).toBe('3');
 
-  await a.page.click('#self');
-  const v = await view(a.page);
-  expect(v.gridNames).toEqual(['You', before[1]]);
-  expect(v.pip).toBe(before[0]);
-  expect(v.pipPlaying).toBe(true);
-
-  // Tapping your own (now big) video swaps back too, in the original order.
-  await a.page.click('#grid .tile.me');
-  expect(await view(a.page)).toMatchObject({ selfInGrid: false, gridNames: before, pip: null });
+  await a.page.click('#self');   // nothing to swap in a group
+  expect(await view(a.page)).toMatchObject({ swapped: false, pip: null, gridNames: before.gridNames, selfInGrid: true });
 
   expectClean(a, b, c);
   for (const p of [a, b, c]) await p.context.close();
@@ -73,18 +70,17 @@ test('someone joining or leaving while swapped returns to the normal view cleanl
   await joinFromLink(c.page, link, 'Peer A');
   await playingVideos(a.page).toBe(2);
   const v = await view(a.page);
-  expect(v).toMatchObject({ selfInGrid: false, pip: null, swapped: false });
+  expect(v).toMatchObject({ selfInGrid: true, pip: null, swapped: false });   // a group: you are a tile
   expect(v.gridNames.sort()).toEqual(['Peer A', 'Peer B']);
   expect(await a.page.locator('#call .tile').count()).toBe(2);   // no leftover tiles
 
-  // Swapped again, and the person shown small leaves.
-  await a.page.click('#self');
-  const small = (await view(a.page)).pip;
-  await (small === 'Peer A' ? c : b).page.click('#cLeave');
+  // Back to a 1-on-1 when someone leaves: you are small again, top right.
+  await c.page.click('#cLeave');
   await poll(a.page, () => document.querySelectorAll('#call .tile').length).toBe(1);
   const after = await view(a.page);
   expect(after).toMatchObject({ selfInGrid: false, pip: null, swapped: false, selfPlaying: true });
-  expect(after.gridNames).toEqual([small === 'Peer A' ? 'Peer B' : 'Peer A']);
+  expect(after.gridNames).toEqual(['Peer B']);
+  expect(await a.page.locator('.self-tile').count()).toBe(0);
 
   expectClean(a, b, c);
   for (const p of [a, b, c]) await p.context.close();
@@ -182,7 +178,7 @@ test('keys do nothing outside a call or while typing', async ({ browser }) => {
 test('buttons say what they do and their key', async ({ browser }) => {
   const a = await person(browser);
   await a.page.goto('/current/');
-  for (const [id, title] of [['cMic', 'Mute or unmute (M)'], ['cCam', 'Camera on or off (V)'], ['topInvite', 'Invite people (I)'], ['whoBtn', 'Connection details (D)'], ['self', 'Swap views (S)']]) {
+  for (const [id, title] of [['cMic', 'Mute or unmute (M)'], ['cCam', 'Camera on or off (V)'], ['cInvite', 'Invite people (I)'], ['whoBtn', 'Connection details (D)'], ['self', 'Swap views (S)']]) {
     await expect(a.page.locator('#' + id)).toHaveAttribute('title', title);
   }
   await a.context.close();
