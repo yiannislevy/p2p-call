@@ -47,7 +47,7 @@ test('1-on-1: camera in Full HD, up to 4 Mbps of video and clearer voice', async
 
   // Connection details show what is actually arriving.
   await a.page.click('#whoBtn');
-  await expect(a.page.locator('#detailsList li .d-sub', { hasText: /^Video: \d+p/ })).toHaveCount(1, { timeout: 15000 });
+  await expect(a.page.locator('#detailsList li:not(.you) .d-fmt', { hasText: /^\d+p · / })).toHaveCount(1, { timeout: 15000 });
   await a.page.click('#detailsClose');
 
   expectClean(a, b);
@@ -127,7 +127,8 @@ test('connection details show the video format and how much data it takes', asyn
   await joinFromLink(b.page, link, 'Peer B');
   await playingVideos(a.page).toBe(1);
   await a.page.click('#whoBtn');
-  await expect(a.page.locator('#detailsList li', { hasText: 'Peer B' })).toContainText(/\d+p, .*(VP8|VP9|H\.264|H\.265|AV1), [\d.]+ (kbps|Mbps)/, { timeout: 15000 });
+  await expect(a.page.locator('#detailsList li', { hasText: 'Peer B' })).toContainText(/\d+p · (VP8|VP9|H\.264|H\.265|AV1)/, { timeout: 15000 });
+  await expect(a.page.locator('#detailsList li', { hasText: 'Peer B' }).locator('.d-mbps')).toHaveText(/^[\d.]+ (kbps|Mbps)$/, { timeout: 15000 });
   expectClean(a, b);
   await a.context.close(); await b.context.close();
 });

@@ -25,7 +25,7 @@ test('two people who cannot connect directly see each other through a third', as
   expect(await tileNames(a.page)).toEqual(['Peer A', 'Peer B']);
   expect(await tileNames(b.page)).toEqual(['Peer A', 'Peer C']);
   await a.page.click('#whoBtn');
-  await expect(a.page.locator('#detailsList li', { hasText: 'Peer B' })).toContainText("passed along by Peer A's phone");
+  await expect(a.page.locator('#detailsList li', { hasText: 'Peer B' })).toContainText("Passed along by Peer A's phone");
   await a.page.click('#detailsClose');
 
   // Peer B mutes: Peer C sees it, although nothing comes to him from her directly.

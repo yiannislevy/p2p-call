@@ -3,6 +3,22 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.19.0
+
+- **New look, step 5 of 5: call details and help messages.** The redesign is complete.
+  - **Call details** is now a sheet from the bottom (a centred panel on computers): swipe it
+    down, tap outside or tap ✕ to close.
+    - **Data saver** with a caption that says what each choice really does: Auto turns on by
+      itself on mobile data (on phones that report it), On uses about a sixth of the data, Off
+      keeps full quality.
+    - **Connections:** one row per person, you first: direct or passed along, good or weak,
+      the data rate, and the picture size and format ("360p · VP8", or Audio only).
+    - **Copy diagnostics**, which says Copied, with a line on what it includes.
+  - **Help messages** share one calm card: what happened, where to allow it on this device,
+    and what to tap. When only the camera is refused or busy, **Join with audio only** goes
+    straight in. Links opened inside Instagram, Messenger and similar apps get a **Copy link**
+    button to paste into Safari or Chrome.
+
 ## v1.18.0
 
 - **New look, step 4 of 5: the call.**

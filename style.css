@@ -651,3 +651,56 @@ body[data-screen="call"] #toasts { top: calc(var(--st) + 96px); }
 #call.mode-one #grid .tile::after { display: none; }   /* 1-on-1: the bars in the name chip say who talks */
 #call.mode-group #grid { padding-top: calc(var(--st) + 76px); }
 #call.mode-group #callTop { min-height: calc(var(--st) + 70px); align-items: flex-start; }
+
+/* ---- call details: a bottom sheet (step 5) ---- */
+#details { align-items: flex-end; padding: 0; background: rgba(0, 0, 0, .56); }
+.details-card {
+  max-width: 520px; max-height: 86dvh; overflow-y: auto; overscroll-behavior: contain;
+  border-radius: var(--r-sheet) var(--r-sheet) 0 0; border-bottom: 0; color: var(--on-video);
+  padding: 8px calc(var(--sr) + 16px) calc(var(--sb) + 16px) calc(var(--sl) + 16px); box-shadow: var(--shadow-sheet);
+}
+@media (min-width: 600px) {
+  #details { align-items: center; padding: 16px; }
+  .details-card { max-width: 420px; border-radius: var(--r-panel); border-bottom: 1px solid var(--tile-line); }
+}
+.grab { display: block; width: 36px; height: 4px; border-radius: 2px; background: rgba(236, 237, 239, .25); margin: 0 auto 6px; }
+.details-card .sheet-head { margin: 0 -10px 0 0; touch-action: none; }
+.details-card .grab { touch-action: none; }
+.details-card #detailsClose { color: var(--on-video); }
+.details-title { font: var(--headline); }
+.details-net { font: var(--caption); font-size: 13px; margin-top: 2px; }
+.details-label { font: var(--label); color: var(--on-video-2); margin: 18px 0 8px; }
+.saver { border-top: 0; margin-top: 0; padding: 0; }
+.seg { background: var(--tile-2); }
+#detailsList { list-style: none; margin: 0; border: 1px solid var(--tile-line); border-radius: var(--r-panel); overflow: hidden; }
+#detailsList li { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 12px; border-bottom: 1px solid var(--tile-line); font-size: 15px; }
+#detailsList li:last-child { border-bottom: 0; }
+#detailsList li.empty { color: var(--on-video-2); min-height: 44px; }
+.d-avatar { width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--tile-2); display: grid; place-items: center; font: var(--label); font-size: 11px; }
+.d-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.d-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#detailsList .d-sub { display: flex; align-items: center; gap: 5px; font: var(--caption); color: var(--on-video-2); }
+.d-sub .ic { width: 14px; height: 14px; flex: none; }
+.sig.good use { color: var(--on-video); }
+.sig use:last-child { color: var(--control); }
+.sig.good use:last-child { color: var(--on-video); }
+.d-rate { flex: none; display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.d-mbps { font-size: 13px; }
+.d-fmt { font: var(--caption); color: var(--on-video-2); }
+.details-card #copyLog { color: var(--on-video); margin-top: 12px; width: auto; }
+.details-card #copyLog .ic { color: var(--on-video-2); }
+@media (hover: hover) { .details-card #copyLog:hover { background: rgba(255, 255, 255, .06); } }
+.details-note { font: var(--caption); color: var(--on-video-2); margin: 2px 0 0 2px; }
+.details-keys { margin: 12px 0 0 2px; }
+
+/* ---- help messages: one calm layout ---- */
+.help { display: flex; gap: 12px; margin-top: 12px; padding: 14px; background: var(--surface); border-radius: var(--r-panel); box-shadow: inset 0 0 0 1px var(--line); }
+.help-icon { width: 48px; height: 48px; flex: none; border-radius: var(--r-panel); background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); display: grid; place-items: center; color: var(--text-secondary); }
+.help-text { flex: 1; min-width: 0; }
+.help-title { font: var(--headline); font-size: 16px; }
+.help-body { font: var(--body); color: var(--text-secondary); margin-top: 4px; }
+.help-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 12px; }
+.help-actions:empty { display: none; }
+.help-actions .btn { min-height: var(--control-h); padding: 0 14px; font-size: 15px; position: relative; }
+.help-actions .btn::after { content: ''; position: absolute; inset: -4px 0; }
+.help-actions .btn.link-btn { padding: 0 8px; color: var(--text-secondary); }

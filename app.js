@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.18.0';
+const VERSION = '1.19.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -198,6 +198,14 @@ $('sheetCopy').addEventListener('click', async () => {
   if (await copyText($('sheetLink').value)) markCopied();
   else { $('sheetLink').focus(); $('sheetLink').select(); }
 });
+// A copy button that briefly says Copied, with a check.
+function showCopied(btn, textId, label) {
+  const use = btn.querySelector('use');
+  $(textId).textContent = 'Copied';
+  if (use) use.setAttribute('href', '#i-check');
+  clearTimeout(btn.__t);
+  btn.__t = setTimeout(() => { $(textId).textContent = label; if (use) use.setAttribute('href', '#i-copy'); }, 1600);
+}
 function closeSheet() { $('sheet').hidden = true; $('sheetBack').hidden = true; sheetRoom = null; }
 $('sheetDone').addEventListener('click', closeSheet);
 $('sheetBack').addEventListener('click', closeSheet);
@@ -420,6 +428,7 @@ async function copyDiagnostics() {
     } else if (!(await copyText(await text))) throw new Error('refused');
     toast('Diagnostics copied (includes your public IP address). Paste them to whoever asked.', 4500);
     $('troubleBtn').classList.remove('alert');
+    showCopied($('copyLog'), 'copyLogText', 'Copy diagnostics');
   } catch {
     if (await copyText(await text)) { toast('Diagnostics copied (includes your public IP address).', 4500); return; }
     openSheet({ title: 'Diagnostics', sub: 'Copying was refused. Select all of it and copy it.', label: 'Diagnostics',
@@ -696,34 +705,49 @@ function knock(pc, addIce) {
 
 const videoConstraints = f => ({ facingMode: f, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } });
 
+// One calm card for camera and microphone trouble: what happened, where to allow it, what to tap.
+function showMediaHelp(title, note, { retry = '', audioOnly = false, icon = 'camera-off' } = {}) {
+  $('mediaHelp').hidden = !note;
+  $('mediaTitle').textContent = title;
+  $('mediaErr').textContent = note;
+  $('mediaIcon').setAttribute('href', '#i-' + icon);
+  $('retryMedia').hidden = !retry;
+  $('retryText').textContent = retry;
+  $('audioOnlyBtn').hidden = !audioOnly;
+}
+const ERR = e => (e && e.name) || '';
+const BLOCKED = n => n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError';
+const BUSY = n => n === 'NotReadableError' || n === 'TrackStartError' || n === 'AbortError';
+const MISSING = n => n === 'NotFoundError' || n === 'DevicesNotFoundError' || n === 'OverconstrainedError';
+
 async function startMedia() {
-  $('mediaErr').textContent = '';
-  $('retryMedia').hidden = true;
+  showMediaHelp('', '');
   if (local) { attachLocal(); return; }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    $('mediaErr').textContent = 'This browser cannot use the camera on this page. Open the link in Safari or Chrome.';
+    showMediaHelp('This browser can\'t use the camera', 'This browser cannot use the camera on this page. Open the link in Safari or Chrome.');
     return;
   }
-  let stream = null, note = '';
+  let stream = null, help = null;
   try {
     stream = await gum({ audio: AUDIO, video: videoConstraints(facing) });
   } catch (e) {
     log('CAMERA', e && e.name);
     try {
       stream = await gum({ audio: AUDIO });
-      note = cameraNote(e);
-      if (e && e.name !== 'NotFoundError' && e.name !== 'OverconstrainedError') { $('retryMedia').textContent = 'Try the camera again'; $('retryMedia').hidden = false; }
+      const n = ERR(e);
+      help = [MISSING(n) ? 'No camera found' : BLOCKED(n) ? 'Camera isn\'t allowed yet' : BUSY(n) ? 'The camera is in use' : 'The camera couldn\'t start',
+        cameraNote(e), MISSING(n) ? {} : { retry: 'Try the camera again', audioOnly: true }];
     } catch (e2) {
       log('MICROPHONE', e2 && e2.name);
-      note = mediaHelp(e2, 'the camera and microphone');
-      $('retryMedia').textContent = 'Try again';
-      $('retryMedia').hidden = false;
+      const n = ERR(e2);
+      help = [BLOCKED(n) ? 'Camera and microphone aren\'t allowed yet' : BUSY(n) ? 'Camera and microphone are in use' : MISSING(n) ? 'No microphone found' : 'Couldn\'t start the camera',
+        mediaHelp(e2, 'the camera and microphone'), { retry: 'Try again', icon: 'mic-off' }];
     }
   }
   // The person may have gone back while the permission prompt was open.
   if (current !== 'lobby' && !inCall) { if (stream) stream.getTracks().forEach(t => t.stop()); return; }
   local = stream;
-  $('mediaErr').textContent = note;
+  if (help) showMediaHelp(...help);
   attachLocal();
   updateFlip();
 }
@@ -861,6 +885,7 @@ $('cCam').addEventListener('click', () => { camOn = !camOn; applyToggles(); send
 $('cFlip').addEventListener('click', () => swapTrack('video', facing === 'user' ? 'environment' : 'user'));
 $('pFlip').addEventListener('click', () => swapTrack('video', facing === 'user' ? 'environment' : 'user'));
 // Trying again also retries the camera when only the microphone started.
+$('audioOnlyBtn').addEventListener('click', () => { $('mediaHelp').hidden = true; $('joinBtn').click(); });
 $('retryMedia').addEventListener('click', () => {
   if (local && !local.getVideoTracks().length && !inCall) stopMedia();
   startMedia();
@@ -927,8 +952,9 @@ const IN_APP = (() => {
 
 function openLobby(r, invited, resume) {
   lobbyRoom = { name: r.name, key: r.key, invited };
-  $('appWarn').hidden = !IN_APP;
-  $('appWarn').textContent = IN_APP ? `You opened this inside ${IN_APP}. Calls work better in Safari or Chrome: tap the ⋯ menu and choose Open in browser.` : '';
+  $('appHelp').hidden = !IN_APP;
+  $('appWarn').textContent = IN_APP ? `You opened this inside ${IN_APP}. Calls need Safari or Chrome: tap the ⋯ menu and choose Open in browser, or copy the link and paste it there.` : '';
+  $('appCopyText').textContent = 'Copy link';
   const saved = data.rooms.find(x => sameRoom(x, r));
   $('lobbyTitle').textContent = saved ? shownName(saved) : r.name;
   $('lobbyWho').hidden = true;
@@ -959,6 +985,9 @@ function openLobby(r, invited, resume) {
 }
 
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.target.blur(); $('joinBtn').click(); } });
+$('appCopy').addEventListener('click', async () => {
+  if (lobbyRoom && await copyText(inviteLink(lobbyRoom))) $('appCopyText').textContent = 'Copied. Paste it in Safari or Chrome';
+});
 // With the camera off, the preview shows your initial, as the others will see it.
 function showInitial() { $('previewInitial').textContent = initials(clean($('nameInput').value) || '?'); }
 $('nameInput').addEventListener('input', showInitial);
@@ -2308,7 +2337,9 @@ function renderSaver() {
   const others = Math.max(1, people.size);
   const mb = p => Math.round(p.bitrate * others * 2 / 8 / 1e6 * 60);   // to and from each person
   const on = saverOn();
-  const why = data.saver === 'auto' ? (on ? 'On, because this phone is on mobile data.' : (conn ? 'Off: not on mobile data.' : 'Off: this phone doesn\'t say when it is on mobile data, so choose On there.')) : (on ? 'On.' : 'Off.');
+  const why = data.saver === 'auto'
+    ? (on ? 'On, because this phone is on mobile data.' : conn ? 'Turns on by itself when this phone is on mobile data.' : 'This phone doesn\'t say when it is on mobile data, so choose On there.')
+    : on ? 'Smaller video for everyone, about a sixth of the data.' : 'Full quality, whatever the connection.';
   $('saverNote').textContent = `${why} Video uses up to about ${mb(on ? saverProfile(others) : sendProfile(others))} MB a minute${on ? ` (instead of ${mb(sendProfile(others))})` : ''}.`;
 }
 for (const b of document.querySelectorAll('#saverSeg button')) {
@@ -2408,7 +2439,7 @@ async function probe() {
 
 function showNetWarning(t) {
   const w = $('netWarn');
-  w.hidden = !(t === 'blocked' && current === 'lobby');
+  $('netHelp').hidden = !(t === 'blocked' && current === 'lobby');
   w.textContent = 'This network blocks direct calls, so you may not be able to connect. Mobile data or another wifi usually works.';
 }
 
@@ -2441,71 +2472,140 @@ async function connectionPath(peerId) {
 
 // What we are actually receiving from someone right now, e.g. "1080p, 30 fps".
 const rates = new Map();   // peerId -> last { bytes, t }, for the data rate in the details
-async function receiving(peerId) {
-  let pc = null;
-  try { const info = room && room.getPeers()[peerId]; pc = info && info.connection; } catch {}
-  if (!pc) return '';
+const fmtRate = kbps => kbps >= 1000 ? (kbps / 1000).toFixed(2) + ' Mbps' : Math.round(kbps) + ' kbps';
+const codecName = c => c && c.mimeType ? c.mimeType.replace(/^video\//i, '').replace(/^H265$/i, 'H.265').replace(/^H264$/i, 'H.264') : '';
+const peerPc = id => { try { const info = room && room.getPeers()[id]; return info && info.connection; } catch { return null; } };
+// How much data a link carries right now, from the change in bytes since the last look.
+function rateOf(key, bytes) {
+  const prev = rates.get(key), now = Date.now();
+  rates.set(key, { bytes, t: now });
+  return prev && now > prev.t && bytes >= prev.bytes ? (bytes - prev.bytes) * 8 / (now - prev.t) : null;   // bits per ms = kbit/s
+}
+// What arrives from someone: { res: '720p', fps, codec: 'H.264', kbps } (all that is known).
+async function receivingParts(peerId) {
+  const pc = peerPc(peerId);
+  const out = {};
+  if (!pc) return out;
   try {
-    let line = '';
     const stats = await pc.getStats();
+    let bytes = 0;
     stats.forEach(s => {
-      if (s.type === 'inbound-rtp' && s.kind === 'video' && s.frameHeight) {
-        line = `${s.frameHeight}p` + (s.framesPerSecond ? `, ${Math.round(s.framesPerSecond)} fps` : '');
-        // Which video format, and how much data it takes right now.
-        const codec = s.codecId && stats.get(s.codecId);
-        if (codec && codec.mimeType) line += ', ' + codec.mimeType.replace(/^video\//i, '').replace(/^H265$/i, 'H.265').replace(/^H264$/i, 'H.264');
-        const prev = rates.get(peerId), now = Date.now();
-        rates.set(peerId, { bytes: s.bytesReceived, t: now });
-        if (prev && now > prev.t && s.bytesReceived >= prev.bytes) {
-          const kbps = (s.bytesReceived - prev.bytes) * 8 / (now - prev.t);   // bits per ms = kbit/s
-          line += ', ' + (kbps >= 1000 ? (kbps / 1000).toFixed(1) + ' Mbps' : Math.round(kbps) + ' kbps');
-        }
+      if (s.type !== 'inbound-rtp') return;
+      bytes += s.bytesReceived || 0;
+      if (s.kind === 'video' && s.frameHeight) {
+        out.res = s.frameHeight + 'p';
+        out.fps = s.framesPerSecond ? Math.round(s.framesPerSecond) : 0;
+        out.codec = codecName(s.codecId && stats.get(s.codecId));
       }
     });
-    return line;
-  } catch { return ''; }
+    const k = rateOf('in:' + peerId, bytes);
+    if (k !== null) out.kbps = k;
+  } catch {}
+  return out;
 }
+// What we send, to everyone together.
+async function sendingParts() {
+  const out = {};
+  let all = {};
+  try { all = room ? room.getPeers() : {}; } catch {}
+  let total = null;
+  for (const id of Object.keys(all)) {
+    const pc = all[id] && all[id].connection;
+    if (!pc) continue;
+    try {
+      const stats = await pc.getStats();
+      let bytes = 0;
+      stats.forEach(s => {
+        if (s.type !== 'outbound-rtp') return;
+        bytes += s.bytesSent || 0;
+        if (s.kind === 'video' && s.frameHeight) { out.res = s.frameHeight + 'p'; out.codec = codecName(s.codecId && stats.get(s.codecId)); }
+      });
+      const k = rateOf('out:' + id, bytes);
+      if (k !== null) total = (total || 0) + k;
+    } catch {}
+  }
+  if (total !== null) out.kbps = total;
+  return out;
+}
+// The same as one line, e.g. "1080p, 30 fps, H.264, 1.42 Mbps", for the diagnostics.
+async function receiving(peerId) {
+  const r = await receivingParts(peerId);
+  if (!r.res) return '';
+  return [r.res + (r.fps ? `, ${r.fps} fps` : ''), r.codec, r.kbps != null ? fmtRate(r.kbps) : ''].filter(Boolean).join(', ');
+}
+
+// One row per person: who, how they're connected, what's arriving and in what format.
+function detailRow(name, sub, { weak = false, rate = '', fmt = '', you = false } = {}) {
+  const li = el('li', you ? 'you' : '');
+  const main = el('span', 'd-main');
+  const subEl = el('span', 'd-sub');
+  if (sub) subEl.append(weak ? weakIcon() : signalIcon(), el('span', '', sub));
+  main.append(el('span', 'd-name', name), subEl);
+  const right = el('span', 'd-rate');
+  if (rate) right.append(el('span', 'd-mbps', rate));
+  if (fmt) right.append(el('span', 'd-fmt', fmt));
+  li.append(el('span', 'd-avatar', you ? initials(data.name || 'You') : initials(name)), main, right);
+  return li;
+}
+function signalIcon() {
+  const s = document.createElementNS(SVG_NS, 'svg');
+  s.setAttribute('class', 'ic sig good'); s.setAttribute('aria-hidden', 'true');
+  for (const id of ['i-signal-low', 'i-signal-high']) { const u = document.createElementNS(SVG_NS, 'use'); u.setAttribute('href', '#' + id); s.append(u); }
+  return s;
+}
+const fmtLine = r => r.res ? [r.res, r.codec].filter(Boolean).join(' · ') : 'Audio only';
 
 async function renderDetails() {
   renderSaver();
   if ($('details').hidden) return;
   $('detailsNet').textContent = 'Your network: ' + (NET_LABEL[netType] || 'checking…') +
     (netType ? (netV6 ? ' Has IPv6, which helps reach other phones on mobile data.' : ' No IPv6.') : '');
-  const list = $('detailsList');
   const items = [];
+  if (people.size) {
+    const mine = await sendingParts();
+    items.push(detailRow('You', camOn ? 'What you send' : 'Sending sound only', { you: true, rate: mine.kbps != null ? fmtRate(mine.kbps) : '', fmt: camOn ? fmtLine(mine) : 'Audio only' }));
+  }
   for (const p of people.values()) {
     const path = p.peerId ? await connectionPath(p.peerId) : '';
-    const video = p.peerId && !p.reconnecting ? await receiving(p.peerId) : '';
-    const li = el('li', '', p.name || 'Someone');
+    const r = p.peerId && !p.reconnecting ? await receivingParts(p.peerId) : {};
     const helper = p.relayVia && byPeer.get(p.relayVia);
     const sub = p.reconnecting ? 'Reconnecting…'
-      : p.relayVia ? `No direct connection: passed along by ${helper && helper.name ? helper.name + '\'s' : 'another'} phone`
-      : path ? 'Direct connection, ' + path : (p.stream ? 'Connected' : 'Connecting…');
-    const theirs = p.net ? ' · their network: ' + p.net + (p.v6 ? ', IPv6' : '') : '';
-    li.append(el('span', 'd-sub', sub + theirs));
-    if (video) li.append(el('span', 'd-sub', 'Video: ' + video));
-    items.push(li);
+      : p.relayVia ? `Passed along by ${helper && helper.name ? helper.name + '\'s' : 'another'} phone`
+      : path ? `Direct · ${p.weak ? 'weak' : 'good'}${path === 'same network' ? ' · same network' : ''}` : (p.stream ? 'Connected' : 'Connecting…');
+    items.push(detailRow(p.name || 'Someone', sub, { weak: !!p.weak, rate: r.kbps != null ? fmtRate(r.kbps) : '', fmt: p.stream ? fmtLine(r) : '' }));
   }
   const linked = new Set([...people.values()].map(p => p.sess).filter(Boolean));
   for (const [cs, u] of unseen) {
     // Only once it lasts: someone just arriving is briefly in the room before connecting.
     if (linked.has(cs) || Date.now() - u.first < 5000) continue;
-    const li = el('li', '', u.name);
-    li.append(el('span', 'd-sub', u.told ? 'In the room, but can\'t connect to you. ' + failureReason() : 'In the room, connecting…'));
-    items.push(li);
+    items.push(detailRow(u.name, u.told ? 'In the room, but can\'t connect to you. ' + failureReason() : 'In the room, connecting…', { weak: true }));
   }
-  for (const why of failures.values()) {
-    const li = el('li', '', 'Someone could not connect');
-    li.append(el('span', 'd-sub', why));
-    items.push(li);
-  }
-  if (!items.length) items.push(el('li', '', 'Nobody else is here yet.'));
-  list.replaceChildren(...items);
+  for (const why of failures.values()) items.push(detailRow('Someone could not connect', why, { weak: true }));
+  if (!items.length) items.push(el('li', 'empty', 'Nobody else is here yet.'));
+  $('detailsList').replaceChildren(...items);
 }
 
+// The details sheet: open from the time or the room name; close with ✕, a tap outside, or a swipe down.
+function closeDetails() { $('details').hidden = true; $('details').querySelector('.details-card').style.transform = ''; }
 $('whoBtn').addEventListener('click', () => { $('details').hidden = false; renderDetails(); });
-$('detailsClose').addEventListener('click', () => { $('details').hidden = true; });
-$('details').addEventListener('click', e => { if (e.target === $('details')) $('details').hidden = true; });
+$('detailsClose').addEventListener('click', closeDetails);
+$('details').addEventListener('click', e => { if (e.target === $('details')) closeDetails(); });
+(() => {
+  const card = $('details').querySelector('.details-card');
+  let startY = null, dy = 0;
+  card.addEventListener('pointerdown', e => {
+    if (!e.target.closest('.grab, .sheet-head') || e.target.closest('button')) return;
+    startY = e.clientY; dy = 0; card.setPointerCapture(e.pointerId);
+  });
+  card.addEventListener('pointermove', e => {
+    if (startY === null) return;
+    dy = Math.max(0, e.clientY - startY);
+    card.style.transform = dy ? `translateY(${dy}px)` : '';
+  });
+  const end = () => { if (startY === null) return; startY = null; if (dy > 80) closeDetails(); else card.style.transform = ''; };
+  card.addEventListener('pointerup', end);
+  card.addEventListener('pointercancel', end);
+})();
 
 /* ---------------------------------------------------------------- presence */
 

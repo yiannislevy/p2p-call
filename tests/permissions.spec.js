@@ -33,6 +33,8 @@ for (const [device, ua, where] of [['iPhone Safari', IPHONE, 'Website Settings']
     await expect(p.page.locator('#mediaErr')).toContainText('The camera and microphone are blocked');
     await expect(p.page.locator('#mediaErr')).toContainText(where);
     await expect(p.page.locator('#retryMedia')).toHaveText('Try again');
+    await expect(p.page.locator('#mediaTitle')).toHaveText('Camera and microphone aren\'t allowed yet');
+    await expect(p.page.locator('#audioOnlyBtn')).toBeHidden();      // no sound either: nothing to join with
     expectClean(owner);
     await owner.context.close(); await p.context.close();
   });
@@ -43,6 +45,8 @@ test('only the camera refused: joins with sound, says the camera is blocked (not
   await expect(p.page.locator('#mediaErr')).toContainText('The camera is blocked, so you will join with sound only');
   await expect(p.page.locator('#mediaErr')).not.toContainText('No camera found');
   await expect(p.page.locator('#retryMedia')).toHaveText('Try the camera again');
+  await expect(p.page.locator('#mediaTitle')).toHaveText('Camera isn\'t allowed yet');
+  await expect(p.page.locator('#audioOnlyBtn')).toBeVisible();
   // Allowed now: trying again brings the camera back.
   await p.page.evaluate(() => { delete navigator.mediaDevices.getUserMedia; });
   await p.page.click('#retryMedia');
@@ -54,6 +58,11 @@ test('only the camera refused: joins with sound, says the camera is blocked (not
 test('camera busy in another app: says so', async ({ browser }) => {
   const { owner, p } = await lobbyWith(browser, null, { camera: 'NotReadableError' });
   await expect(p.page.locator('#mediaErr')).toContainText('Another app is using the camera');
+  await expect(p.page.locator('#mediaTitle')).toHaveText('The camera is in use');
+  // Join with audio only goes straight in.
+  await p.page.fill('#nameInput', 'Peer B');
+  await p.page.click('#audioOnlyBtn');
+  await expect(p.page.locator('#call')).toBeVisible({ timeout: 15000 });
   expectClean(owner);
   await owner.context.close(); await p.context.close();
 });

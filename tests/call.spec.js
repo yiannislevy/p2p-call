@@ -35,7 +35,8 @@ test('three people call: everyone sees everyone, names, mute and camera state, l
   // Connection details open and list both people.
   await a.page.click('#whoBtn');
   await expect(a.page.locator('#details')).toBeVisible();
-  await expect(a.page.locator('#detailsList li')).toHaveCount(2);
+  await expect(a.page.locator('#detailsList li')).toHaveCount(3);   // you, and the two others
+  await expect(a.page.locator('#detailsList li.you .d-name')).toHaveText('You');
   await a.page.click('#detailsClose');
 
   // Leave button: back home, camera released, the others are told.
