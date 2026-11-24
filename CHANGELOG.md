@@ -3,6 +3,22 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.16.0
+
+- **New look, step 2 of 5: rooms, adding a room, inviting.**
+  - The rooms screen has a clear title and two sections: **In a call now**, a card per room
+    with a call going on, saying who is in it and for how long, with a Join button; and your
+    **saved** rooms in one tidy list, each with its invite button.
+  - First open explains the app in one line, with Add a room and Paste an invite link.
+  - Adding a room: one screen with a switch between **New room** and **Paste invite**. The
+    password is hidden until you show it. **Save and join** goes straight to the room;
+    **Save for later** keeps it for another time. Pasting a single invite link opens that room.
+  - The invite panel (on computers, or where the phone's share sheet isn't available) names
+    the room, copies the link at once and says so, with a Share button where there is one.
+  - Forget all rooms asks first, in a calm sheet instead of a browser pop-up.
+- **How long a call has run.** People in a call now also say when they joined, so the rooms
+  screen can show it. Older versions still show who is in, just without the time.
+
 ## v1.15.0
 
 - **New look, step 1 of 5: the foundations.** Every colour, type size and corner now comes

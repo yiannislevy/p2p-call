@@ -18,7 +18,7 @@ test('in a call the address shows only the room name, and it opens the room', as
   await b.page.click('#pasteLinksBtn');
   await b.page.fill('#importText', link);
   await b.page.click('#importBtn');
-  await expect(b.page.locator('#home')).toBeVisible();
+  await expect(b.page.locator('#lobby')).toBeVisible();      // one link: straight to that room
   await b.page.goto('about:blank');
   await b.page.goto(address);
   await expect(b.page.locator('#lobby')).toBeVisible();
@@ -31,7 +31,8 @@ test('in a call the address shows only the room name, and it opens the room', as
   await expect(c.page.locator('#addName')).toHaveValue('alpha');
   await expect(c.page.locator('#addKey')).toBeFocused();
   await c.page.fill('#addKey', key);
-  await c.page.click('#saveBtn');
+  await expect(c.page.locator('#saveBtn')).toBeHidden();   // joining: one button, Join
+  await c.page.click('#saveJoinBtn');
   await expect(c.page.locator('#lobby')).toBeVisible();
   await c.page.fill('#nameInput', 'Peer B');
   await c.page.click('#joinBtn');

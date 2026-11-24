@@ -168,8 +168,10 @@ export function createPresence({ relays, appId }) {
     } else if (note.t === 'here') {
       const name = typeof note.n === 'string' ? note.n.trim().replace(/\s+/g, ' ').slice(0, 30) : '';
       const cs = typeof note.cs === 'string' && /^[0-9a-f]{8,32}$/.test(note.cs) ? note.cs : '';
+      // When they joined (seconds), so the rooms screen can say how long a call has run.
+      const j = typeof note.j === 'number' && note.j <= now() + MAX_SKEW_S && now() - note.j < 86400 ? Math.floor(note.j) : 0;
       const had = ch.members.get(note.id);
-      ch.members.set(note.id, { name: name || 'Someone', cs, last: Date.now() });
+      ch.members.set(note.id, { name: name || 'Someone', cs, j, last: Date.now() });
       if (!had || had.name !== name || had.cs !== cs) changed(ch);
       else if (cs && watchHandler) changed(ch);   // keep "still alive" fresh for the call screen
     } else if (note.t === 'bye') {
@@ -180,7 +182,9 @@ export function createPresence({ relays, appId }) {
   function changed(ch) {
     if (ch.watched && watchHandler) {
       const list = [...ch.members.values()];
-      watchHandler(ch.rk, members(ch), new Set(list.map(m => m.cs).filter(Boolean)), list.map(m => ({ name: m.name, cs: m.cs })));
+      const joined = list.map(m => m.j).filter(Boolean);
+      watchHandler(ch.rk, members(ch), new Set(list.map(m => m.cs).filter(Boolean)), list.map(m => ({ name: m.name, cs: m.cs })),
+        joined.length ? Math.min(...joined) : 0);
     }
   }
   const members = ch => [...ch.members.values()].map(m => m.name).sort((a, b) => a.localeCompare(b));
@@ -200,7 +204,7 @@ export function createPresence({ relays, appId }) {
   async function sayHere(ch) {
     const who = ch.announcing;
     if (!who) return;
-    const here = await seal(ch, { t: 'here', n: who(), cs: ch.callSession ? ch.callSession() : undefined });
+    const here = await seal(ch, { t: 'here', n: who(), cs: ch.callSession ? ch.callSession() : undefined, j: ch.joined || undefined });
     const bye = await seal(ch, { t: 'bye' });   // kept ready so leaving can be announced instantly
     if (ch.announcing !== who) return;          // left while this note was being prepared
     ch.bye = bye;
@@ -238,6 +242,7 @@ export function createPresence({ relays, appId }) {
   // dropped link (person still here) from a person who is gone.
   async function announce(room, getName, getCallSession) {
     const ch = channel(room);
+    if (!ch.announcing) ch.joined = now();
     ch.announcing = getName;
     ch.callSession = getCallSession || null;
     ensureSockets();

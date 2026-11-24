@@ -77,6 +77,8 @@ test('a pasted message with an invite link adds the room, and the Paste button r
   await b.page.evaluate(text => navigator.clipboard.writeText(text), `Join us tonight! ${link} see you`);
   await b.page.click('#pasteLinksBtn');
   await b.page.click('#pasteBtn');
+  await expect(b.page.locator('#lobbyTitle')).toHaveText('alpha');   // one link: straight to that room
+  await b.page.click('[data-back]:visible');
   await expect(b.page.locator('#home')).toBeVisible();
   expect(await shownRooms(b.page)).toEqual(['alpha']);    // the message text is not taken as a name
 
@@ -92,7 +94,8 @@ test('a pasted message with an invite link adds the room, and the Paste button r
   // From the create screen there is a way to the paste screen too.
   await b.page.click('[data-back]:visible');
   await b.page.click('#addBtn');
-  await b.page.click('#toPaste');
+  await b.page.click('#segPaste');
+  await expect(b.page.locator('#segPaste')).toHaveAttribute('aria-checked', 'true');
   await expect(b.page.locator('#pasteBtn')).toBeVisible();
   await expect(b.page.locator('#addName')).toBeHidden();
   expectClean(a, b);

@@ -47,8 +47,8 @@ test('the page follows light and dark, with the brand colours on the main button
     await a.page.goto('/current/');
     await expect(a.page.locator('#home')).toBeVisible();
     expect(await a.page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(bg);
-    expect(await a.page.evaluate(() => getComputedStyle(document.getElementById('addBtn')).backgroundColor)).toBe(brand);
-    expect(await a.page.evaluate(() => getComputedStyle(document.querySelector('h1 .mark')).width)).toBe('22px');
+    expect(await a.page.evaluate(() => getComputedStyle(document.getElementById('addFirstBtn')).backgroundColor)).toBe(brand);
+    expect(await a.page.evaluate(() => getComputedStyle(document.querySelector('.brand .mark')).width)).toBe('22px');
     expect(a.problems).toEqual([]);
     await a.context.close();
   }

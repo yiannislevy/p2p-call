@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.15.0';
+const VERSION = '1.16.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -163,18 +163,41 @@ async function invite(r) {
     try { await navigator.share({ title: `${r.name} · video room`, url }); return; }
     catch (e) { if (e && e.name === 'AbortError') return; }   // closed it: nothing to do
   }
-  const copied = await copyText(url);
-  sheetRoom = r;
-  $('sheetTitle').textContent = copied ? 'Invite link copied' : 'Copy this invite link';
-  $('sheetSub').textContent = copied
-    ? `Send it to the people in "${r.name}". Anyone with the link can join this room.`
-    : `Select it and copy it, then send it to the people in "${r.name}".`;
-  $('sheetLink').value = url;
-  $('sheetShare').hidden = !navigator.share;
+  const copied = await copyText(url);   // copied straight away: one tap and it's ready to paste
+  openSheet({ room: r, title: `Invite to ${shownName(r)}`, label: 'Invite link', value: url, copy: 'Copy link', share: !!navigator.share,
+    sub: 'Anyone with this link can join. Send it only to people you would call.' });
+  if (copied) markCopied(); else { $('sheetLink').focus(); $('sheetLink').select(); }
+}
+// One sheet for anything to copy: an invite link, or (when copying was refused) rooms or diagnostics.
+let copiedTimer = 0, copyLabel = 'Copy link';
+function openSheet({ room = null, title, sub, label, value, copy = 'Copy', share = false }) {
+  sheetRoom = room;
+  $('sheetTitle').textContent = title;
+  $('sheetSub').textContent = sub;
+  $('sheetLabel').textContent = label;
+  $('sheetLink').value = value;
+  copyLabel = copy;
+  clearTimeout(copiedTimer);
+  $('sheetCopyText').textContent = copy;
+  $('sheetCopy').querySelector('use').setAttribute('href', '#i-copy');
+  $('sheetShare').hidden = !share;
+  $('sheetCopy').classList.toggle('primary', !share);   // where Share isn't offered, Copy is the main action
   $('sheetBack').hidden = false;
   $('sheet').hidden = false;
-  if (!copied) { $('sheetLink').focus(); $('sheetLink').select(); }
 }
+function markCopied() {
+  $('sheetCopyText').textContent = 'Copied';
+  $('sheetCopy').querySelector('use').setAttribute('href', '#i-check');
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => {
+    $('sheetCopyText').textContent = copyLabel;
+    $('sheetCopy').querySelector('use').setAttribute('href', '#i-copy');
+  }, 1600);
+}
+$('sheetCopy').addEventListener('click', async () => {
+  if (await copyText($('sheetLink').value)) markCopied();
+  else { $('sheetLink').focus(); $('sheetLink').select(); }
+});
 function closeSheet() { $('sheet').hidden = true; $('sheetBack').hidden = true; sheetRoom = null; }
 $('sheetDone').addEventListener('click', closeSheet);
 $('sheetBack').addEventListener('click', closeSheet);
@@ -233,36 +256,74 @@ function toHome() {
 
 function renderHome() {
   if (!data.rooms.length) editing = false;
-  const list = $('roomList');
-  list.replaceChildren();
-  $('homeEmpty').hidden = data.rooms.length > 0;
-  $('editBtn').hidden = data.rooms.length === 0;
+  const first = !data.rooms.length;
+  $('home').classList.toggle('first', first);
+  $('homeEmpty').hidden = !first;
+  $('homeRooms').hidden = first;
+  $('editBtn').hidden = first;
   $('editBtn').textContent = editing ? 'Done' : 'Edit';
   $('moveBox').hidden = !editing;
-  $('addBtn').parentElement.hidden = editing;
+  $('addFirstBtn').hidden = !first;
+  $('addFirstBtn').parentElement.hidden = editing;
+  $('forgetBtn').hidden = first;
+  const list = $('roomList'), live = $('liveList');
+  list.replaceChildren();
+  live.replaceChildren();
   rowRefs.clear();
   data.rooms.forEach((r, i) => {
     const li = el('li', 'room');
-    if (editing) { li.append(...editRow(r, i)); $('roomList').append(li); return; }
+    if (editing) { li.append(...editRow(r, i)); list.append(li); return; }
+    const rk = roomKeyOf(r);
+    const now = presenceNow.get(rk);
+    if (now) { live.append(liveCard(r, rk, now)); return; }
     const main = el('button', 'main');
     main.type = 'button';
-    const sub = el('div', 'sub', 'Tap to join');
-    main.append(el('div', 'name', shownName(r)), sub);
-    const faces = el('span', 'faces');
-    faces.hidden = true;
-    if (!editing) rowRefs.set(roomKeyOf(r), { sub, faces, li });
+    main.append(el('span', 'initial', initialOf(shownName(r))), el('span', 'name', shownName(r)));   // invite sits where a chevron would: one trailing control, less clutter
     main.addEventListener('click', () => openLobby(r, false));
     const inv = el('button', 'icon-btn');
     inv.type = 'button';
     inv.setAttribute('aria-label', 'Invite people to ' + shownName(r));
     inv.append(icon('invite'));
     inv.addEventListener('click', () => invite(r));
-    li.append(main, faces, inv);
+    li.append(main, inv);
     list.append(li);
   });
-  for (const [rk, names] of presenceNow) showPresence(rk, names);
+  $('liveSec').hidden = !live.children.length;
+  $('savedSec').hidden = !list.children.length;
+  $('savedTitle').hidden = !live.children.length;   // a heading is only needed beside "In a call now"
   syncWatching();
 }
+const initialOf = name => (Array.from(String(name).trim())[0] || '?').toUpperCase();
+
+// A room with a call going on: who is in it, for how long, and a Join button.
+function liveCard(r, rk, now) {
+  const li = el('li', 'room live');
+  const main = el('button', 'main');
+  main.type = 'button';
+  const sub = el('span', 'sub', liveText(now));
+  const text = el('span', 'text');
+  text.append(el('span', 'name', shownName(r)), sub);
+  main.append(el('span', 'initial', initialOf(shownName(r))), text);
+  main.addEventListener('click', () => openLobby(r, false));
+  const join = el('button', 'btn live', 'Join');
+  join.type = 'button';
+  join.setAttribute('aria-label', 'Join ' + shownName(r));
+  join.addEventListener('click', () => openLobby(r, false));
+  li.append(main, join);
+  rowRefs.set(rk, { sub, li });
+  return li;
+}
+function liveText({ names, since }) {
+  const who = names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}`
+    : `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+  if (!since) return who;
+  const min = Math.floor((Date.now() / 1000 - since) / 60);
+  return `${who} · ${min < 1 ? 'just started' : min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`}`;
+}
+setInterval(() => {
+  if (current !== 'home' || document.visibilityState !== 'visible') return;
+  for (const [rk, ref] of rowRefs) { const now = presenceNow.get(rk); if (now) ref.sub.textContent = liveText(now); }
+}, 30000);
 
 // Editing: give a room your own name (only on this device; others keep its real name),
 // move it up or down, or remove it.
@@ -361,13 +422,8 @@ async function copyDiagnostics() {
     $('troubleBtn').classList.remove('alert');
   } catch {
     if (await copyText(await text)) { toast('Diagnostics copied (includes your public IP address).', 4500); return; }
-    sheetRoom = null;
-    $('sheetTitle').textContent = 'Diagnostics';
-    $('sheetSub').textContent = 'Copying was refused. Select all of it and copy it.';
-    $('sheetLink').value = (await text).replace(/\n/g, '  ');
-    $('sheetShare').hidden = true;
-    $('sheetBack').hidden = false;
-    $('sheet').hidden = false;
+    openSheet({ title: 'Diagnostics', sub: 'Copying was refused. Select all of it and copy it.', label: 'Diagnostics',
+      value: (await text).replace(/\n/g, '  ') });
   }
 }
 $('troubleBtn').addEventListener('click', copyDiagnostics);
@@ -387,23 +443,27 @@ $('copyLog').addEventListener('click', copyDiagnostics);
 $('copyAllBtn').addEventListener('click', async () => {
   const text = exportText();
   const n = data.rooms.length;
-  if (await copyText(text)) { toast(`Copied ${n} room${n === 1 ? '' : 's'}. In the other browser or app: Paste invite links.`, 4500); return; }
+  if (await copyText(text)) { toast(`Copied ${n} room${n === 1 ? '' : 's'}. In the other browser or app: Paste an invite link.`, 4500); return; }
   // Copying was refused: show them to copy by hand.
-  sheetRoom = null;
-  $('sheetTitle').textContent = 'Copy your rooms';
-  $('sheetSub').textContent = 'Select all of it and copy it, then paste it in the other browser or app with Paste invite links.';
-  $('sheetLink').value = text.replace(/\n/g, '  ');
-  $('sheetShare').hidden = true;
-  $('sheetBack').hidden = false;
-  $('sheet').hidden = false;
+  openSheet({ title: 'Copy your rooms', sub: 'Select all of it and copy it, then paste it in the other browser or app with Paste an invite link.',
+    label: 'Your rooms', value: text.replace(/\n/g, '  ') });
   $('sheetLink').focus(); $('sheetLink').select();
 });
 $('pasteLinksBtn').addEventListener('click', () => { openAdd(true); $('importText').focus(); });
 $('addBtn').addEventListener('click', () => openAdd(false));
-$('forgetBtn').addEventListener('click', () => {
-  if (!confirm('Remove all rooms and your name from this device?')) return;
+$('addFirstBtn').addEventListener('click', () => openAdd(false));
+function askForget(open) {
+  $('confirm').hidden = $('confirmBack').hidden = !open;
+  if (open) $('confirmNo').focus(); else $('forgetBtn').focus();
+}
+$('forgetBtn').addEventListener('click', () => askForget(true));
+$('confirmNo').addEventListener('click', () => askForget(false));
+$('confirmBack').addEventListener('click', () => askForget(false));
+$('confirm').addEventListener('keydown', e => { if (e.key === 'Escape') askForget(false); });
+$('confirmYes').addEventListener('click', () => {
   try { localStorage.removeItem(STORE_KEY); } catch {}
   data = { name: '', rooms: [] };
+  askForget(false);
   renderHome();
   toast('Everything removed from this device');
 });
@@ -413,21 +473,39 @@ $('forgetBtn').addEventListener('click', () => {
 function addMode(pasting) {
   $('createPart').hidden = pasting;
   $('importPart').hidden = !pasting;
-  $('addTitle').textContent = pasting ? 'Paste invite links' : 'Add a room';
+  $('segNew').setAttribute('aria-checked', String(!pasting));
+  $('segPaste').setAttribute('aria-checked', String(pasting));
 }
+$('segNew').addEventListener('click', () => { addMode(false); $('addErr').textContent = ''; });
+$('segPaste').addEventListener('click', () => { addMode(true); $('importErr').textContent = ''; showFound(); });
+for (const id of ['segNew', 'segPaste']) $(id).addEventListener('keydown', e => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const other = id === 'segNew' ? 'segPaste' : 'segNew';
+  $(other).click(); $(other).focus();
+});
+function showPassword(on) {
+  $('addKey').type = on ? 'text' : 'password';
+  $('revealBtn').setAttribute('aria-pressed', String(on));
+  $('revealBtn').setAttribute('aria-label', on ? 'Hide password' : 'Show password');
+}
+$('revealBtn').addEventListener('click', () => showPassword($('addKey').type === 'password'));
 let joinAfterSave = false;
 function openAdd(pasting) {
   addMode(!!pasting);
   joinAfterSave = false;
-  $('createLead').textContent = 'Create a new room, or enter the name and password someone gave you.';
+  $('addTitle').textContent = 'Add a room';
+  $('addSeg').hidden = false;
+  $('createLead').hidden = true;
+  $('saveBtn').hidden = false;
+  $('saveJoinBtn').textContent = 'Save and join';
+  showPassword(false);
   $('addName').value = '';
   $('addKey').value = newPassword();
   $('addErr').textContent = '';
   $('importText').value = '';
   $('importErr').textContent = '';
   const canRead = !!(navigator.clipboard && navigator.clipboard.readText);
-  $('pasteBtn').parentElement.hidden = !canRead;
-  $('importLabel').textContent = canRead ? 'Or paste them here' : 'Paste them here';
+  $('pasteBtn').hidden = !canRead;
   showFound();
   push('add');
 }
@@ -436,12 +514,15 @@ function openAddForRoom(name) {
   openAdd(false);
   joinAfterSave = true;
   $('addTitle').textContent = `Join "${name}"`;
+  $('addSeg').hidden = true;
+  $('createLead').hidden = false;
   $('createLead').textContent = 'Enter the room\'s password. Ask whoever sent you the address for it, or for an invite link.';
+  $('saveBtn').hidden = true;
+  $('saveJoinBtn').textContent = 'Join';
   $('addName').value = name;
   $('addKey').value = '';
   setTimeout(() => $('addKey').focus(), 50);
 }
-$('toPaste').addEventListener('click', () => { addMode(true); $('importErr').textContent = ''; showFound(); });
 
 // As soon as there is text in the box: which rooms it holds, and one clear button to add them.
 function showFound() {
@@ -461,9 +542,8 @@ function showFound() {
   }
   btn.disabled = !fresh.length;
   btn.classList.toggle('primary', fresh.length > 0);
-  $('pasteBtn').classList.toggle('primary', !fresh.length);   // one black button at a time
-  btn.textContent = fresh.length ? `Add ${fresh.length} room${fresh.length === 1 ? '' : 's'}`
-    : found.length ? 'You already have these' : 'Add rooms';
+  btn.textContent = fresh.length === 1 && found.length === 1 ? 'Join room'
+    : fresh.length ? `Add ${fresh.length} rooms` : found.length ? 'You already have these' : 'Join room';
   return { found, fresh };
 }
 $('importText').addEventListener('input', () => { $('importErr').textContent = ''; showFound(); });
@@ -472,6 +552,8 @@ function importRooms() {
   const { found, fresh } = showFound();
   if (!fresh.length) return false;
   for (const r of fresh) addRoom(r);
+  // One invite link: go straight to that room. Several (moving rooms over): back to the list.
+  if (fresh.length === 1 && found.length === 1) { history.replaceState({ s: 'home' }, ''); openLobby(fresh[0], false); return true; }
   const had = found.length - fresh.length;
   pendingToast = `Added ${fresh.length} room${fresh.length === 1 ? '' : 's'}` + (had ? ` (${had} you already had)` : '');
   back();
@@ -495,20 +577,22 @@ $('pasteBtn').addEventListener('click', async () => {
   $('importErr').textContent = found.length ? 'You already have all of these rooms.'
     : 'Your clipboard has no invite links. Copy them first (in the other browser: Edit, Copy all rooms).';
 });
-$('genBtn').addEventListener('click', () => { $('addKey').value = newPassword(); });
+$('genBtn').addEventListener('click', () => { $('addKey').value = newPassword(); showPassword(true); });
 $('addName').addEventListener('keydown', e => { if (e.key === 'Enter') $('addKey').focus(); });
-$('addKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('saveBtn').click(); });
-$('saveBtn').addEventListener('click', () => {
+$('addKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('saveJoinBtn').click(); });
+function saveForm(join) {
   const r = { name: clean($('addName').value), key: $('addKey').value.trim() };
   if (!r.name) { $('addErr').textContent = 'Give the room a name, like family.'; $('addName').focus(); return; }
   if (r.key.length < 8) { $('addErr').textContent = 'Use a password of at least 8 characters. The generated one is best.'; return; }
   if (/\s/.test(r.key)) { $('addErr').textContent = 'The password cannot contain spaces.'; return; }
   const existed = data.rooms.some(x => sameRoom(x, r));
   addRoom(r);
-  if (joinAfterSave) { joinAfterSave = false; history.replaceState({ s: 'home' }, ''); openLobby(r, false); return; }
-  pendingToast = existed ? 'You already had this room' : 'Room saved. Use the share button to invite people.';
+  if (join || joinAfterSave) { joinAfterSave = false; history.replaceState({ s: 'home' }, ''); openLobby(r, false); return; }
+  pendingToast = existed ? 'You already had this room' : 'Room saved. Use the invite button to send it.';
   back();
-});
+}
+$('saveJoinBtn').addEventListener('click', () => saveForm(true));
+$('saveBtn').addEventListener('click', () => saveForm(false));
 
 /* ------------------------------------------------------------------- media */
 
@@ -2366,8 +2450,8 @@ $('details').addEventListener('click', e => { if (e.target === $('details')) $('
 /* ---------------------------------------------------------------- presence */
 
 // Who is in each room's call right now, shown on the rooms screen and before joining.
-const presenceNow = new Map();   // roomKey -> names in that call
-const rowRefs = new Map();       // roomKey -> elements of that room's row
+const presenceNow = new Map();   // roomKey -> { names, since }: who is in that call, and since when (s)
+const rowRefs = new Map();       // roomKey -> elements of that room's live card
 
 function initials(name) {
   const words = String(name).trim().split(/\s+/).filter(Boolean);
@@ -2381,32 +2465,26 @@ function whoText(names) {
 }
 
 function showPresence(rk, names) {
-  const row = rowRefs.get(rk);
-  if (row) {
-    row.li.classList.toggle('busy', names.length > 0);
-    row.sub.textContent = names.length ? whoText(names) : 'Tap to join';
-    row.faces.hidden = !names.length;
-    row.faces.replaceChildren(
-      ...names.slice(0, 3).map(n => el('span', 'face', initials(n))),
-      ...(names.length > 3 ? [el('span', 'face more', '+' + (names.length - 3))] : []),
-      el('span', 'dot')
-    );
-    row.faces.setAttribute('aria-label', names.length ? whoText(names) : '');
-  }
   if (lobbyRoom && current === 'lobby' && roomKeyOf(lobbyRoom) === rk) {
     $('lobbyWho').hidden = !names.length;
     $('lobbyWho').textContent = names.length ? whoText(names) : '';
   }
 }
 
-function onPresence(rk, names, sessions, members) {
+function onPresence(rk, names, sessions, members, since) {
   if (inCall && callRoom && rk === roomKeyOf(callRoom)) {
     aliveInCall = sessions || new Set();
     roomMembers = members || [];
     checkUnseen();
   }
-  if (names.length) presenceNow.set(rk, names); else presenceNow.delete(rk);
+  const was = presenceNow.get(rk);
+  if (names.length) presenceNow.set(rk, { names, since: since || 0 }); else presenceNow.delete(rk);
   showPresence(rk, names);
+  if (current === 'home' && !editing) {
+    const ref = rowRefs.get(rk);
+    if (!!was !== !!names.length) renderHome();            // moves between "In a call now" and the saved rooms
+    else if (ref && names.length) ref.sub.textContent = liveText(presenceNow.get(rk));
+  }
 }
 
 // Only watch while the rooms screen (or the screen before joining) is open and visible.
