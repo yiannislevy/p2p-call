@@ -30,10 +30,15 @@ test('1-on-1: tapping your own video swaps it with theirs, and tapping again swa
   const { ps: [a, b] } = await call(browser, ['Peer C', 'Peer B']);
   expect(await view(a.page)).toMatchObject({ selfInGrid: false, gridNames: ['Peer B'], pip: null, swapped: false });
 
+  expect((await a.page.locator('#self').boundingBox()).width).toBe(96);   // small, top right
   for (let round = 0; round < 3; round++) {
     await a.page.click('#self');
     await poll(a.page, () => document.getElementById('self').videoWidth > 0 && !document.getElementById('self').paused).toBe(true);
     expect(await view(a.page)).toMatchObject({ selfInGrid: true, selfPlaying: true, gridNames: ['You'], pip: 'Peer B', pipPlaying: true, swapped: true });
+    // Your video really takes the screen (not stuck small in a corner), and theirs sits top right.
+    const vw = await a.page.evaluate(() => innerWidth);
+    expect((await a.page.locator('#self').boundingBox()).width).toBe(vw);
+    expect((await a.page.locator('#call > .tile.as-pip').boundingBox()).width).toBe(96);
 
     await a.page.click('#call > .tile.as-pip');
     expect(await view(a.page)).toMatchObject({ selfInGrid: false, selfPlaying: true, gridNames: ['Peer B'], pip: null, swapped: false });

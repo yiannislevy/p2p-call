@@ -3,6 +3,13 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.19.1
+
+- **Fixed: swapping views in a 1-on-1.** Tapping your own video put it in a small box in the
+  corner and left the rest of the screen empty. Your video now takes the whole screen, with
+  theirs small at the top right, and tapping that swaps back.
+- Your own small video always fills its frame.
+
 ## v1.19.0
 
 - **New look, step 5 of 5: call details and help messages.** The redesign is complete.

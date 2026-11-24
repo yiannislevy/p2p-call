@@ -598,7 +598,7 @@ body[data-screen="call"] #toasts { top: calc(var(--st) + 96px); }
 }
 #call.mode-one .who::after { content: ''; position: absolute; inset: -6px; }
 #call.mode-one #callMeta { color: var(--on-video); font-size: 13px; }
-#call.mode-one #self, #call.mode-one .tile.as-pip {
+#call.mode-one > #self, #call.mode-one .tile.as-pip {
   top: calc(var(--st) + 10px); right: calc(var(--sr) + 16px); bottom: auto;
   width: 96px; height: 128px; aspect-ratio: auto; border-radius: var(--r-panel);
   border: 1px solid rgba(255, 255, 255, .14); box-shadow: 0 4px 16px rgba(0, 0, 0, .3);
@@ -608,7 +608,7 @@ body[data-screen="call"] #toasts { top: calc(var(--st) + 96px); }
 #call.mode-one.swapped #cFlip { top: auto; right: auto; bottom: calc(var(--sb) + 12px + 68px + 16px); left: calc(var(--sl) + 16px); }
 #call.mode-one #cFloat { position: absolute; top: calc(var(--st) + 10px); right: calc(var(--sr) + 16px + 96px + 8px); }
 @media (orientation: landscape) {
-  #call.mode-one #self, #call.mode-one .tile.as-pip { width: 128px; height: 96px; }
+  #call.mode-one > #self, #call.mode-one .tile.as-pip { width: 128px; height: 96px; }
   #call.mode-one #cFlip { top: calc(var(--st) + 10px + 96px - 34px); }
   #call.mode-one #cFloat { right: calc(var(--sr) + 16px + 128px + 8px); }
 }
@@ -704,3 +704,8 @@ body[data-screen="call"] #toasts { top: calc(var(--st) + 96px); }
 .help-actions .btn { min-height: var(--control-h); padding: 0 14px; font-size: 15px; position: relative; }
 .help-actions .btn::after { content: ''; position: absolute; inset: -4px 0; }
 .help-actions .btn.link-btn { padding: 0 8px; color: var(--text-secondary); }
+
+/* your own small video always fills its frame */
+#call > #self { object-fit: cover; display: block; }
+/* swapped in a 1-on-1: your video takes the whole screen, theirs is small at the top right */
+#call.mode-one .tile.me #self { position: static; inset: auto; width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none; object-fit: cover; }
