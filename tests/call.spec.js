@@ -62,7 +62,11 @@ test('camera and microphone can be switched off before joining', async ({ browse
   await a.page.click('#pMic');
   await a.page.click('#pCam');
   await expect(a.page.locator('#previewOff')).toBeVisible();
+  await expect(a.page.locator('#previewOffText')).toHaveText('Camera is off');
+  await expect(a.page.locator('#pFlip')).toBeHidden();          // nothing to flip with the camera off
   await a.page.fill('#nameInput', 'Peer C');
+  await expect(a.page.locator('#previewInitial')).toHaveText('PC');   // as the others will see you
+  await expect(a.page.locator('#joinBtn')).toHaveText('Join');
   await a.page.click('#joinBtn');
   await expect(a.page.locator('#cMic .lb')).toHaveText('Unmute');
 

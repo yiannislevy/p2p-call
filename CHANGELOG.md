@@ -3,6 +3,14 @@
 Every release is tagged and can be put live again from the Actions tab
 ("Deploy a version (rollback)").
 
+## v1.17.0
+
+- **New look, step 3 of 5: before joining.** The room's name sits in the header, with a
+  small "1 in call" marker when someone is already there. A taller camera preview marked
+  "Preview", with microphone, camera and flip-camera buttons on it (flip only where the
+  device has two cameras). With the camera off, the preview shows your initials, as the
+  others will see you. Below: your name, who is already in the call, and one Join button.
+
 ## v1.16.0
 
 - **New look, step 2 of 5: rooms, adding a room, inviting.**

@@ -46,6 +46,7 @@ test('opening the rooms screen later shows who is already in, straight away', as
   // The screen before joining says it too.
   await row(a.page, 'alpha').locator('.main').click();
   await expect(a.page.locator('#lobbyWho')).toHaveText('Peer B is in the call', { timeout: 8000 });
+  await expect(a.page.locator('#lobbyLive')).toHaveText('1 in call');
 
   expectClean(a, b);
   await a.context.close(); await b.context.close();

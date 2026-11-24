@@ -14,7 +14,7 @@ if (window.top !== window.self) {
 
 /* ------------------------------------------------------------------ config */
 
-const VERSION = '1.16.0';
+const VERSION = '1.17.0';
 const APP_ID = 'plain-call/v1/k3q9w';      // changing this disconnects everyone from everyone
 const RELAYS = [                            // must match connect-src in index.html
   'wss://relay.primal.net',
@@ -808,7 +808,8 @@ function applyToggles() {
   setToggle($('cCam'), !camOn || !v, !!v, camL);
   refreshZoom();
   $('previewOff').hidden = !!(v && camOn);
-  $('previewOff').textContent = v ? 'Camera is off' : (local ? 'No camera' : 'Starting camera…');
+  $('previewOffText').textContent = v ? 'Camera is off' : (local ? 'No camera' : 'Starting camera…');
+  $('pFlip').hidden = $('cFlip').hidden || !camOn;
   $('self').classList.toggle('cam-off', !(v && camOn));
   if (!micOn) $('self').classList.remove('speaking');   // never show ourselves talking while muted
   if (swapped) { swapped.me.classList.toggle('muted', !micOn); if (!micOn) swapped.me.classList.remove('speaking'); }
@@ -818,6 +819,7 @@ async function updateFlip() {
   let n = 0;
   try { n = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput').length; } catch {}
   $('cFlip').hidden = n < 2 || !(local && local.getVideoTracks()[0]);
+  $('pFlip').hidden = $('cFlip').hidden || !camOn;
 }
 
 // Swap a track for a fresh one (camera flip, or recovering after iOS suspends the camera).
@@ -856,6 +858,7 @@ $('pCam').addEventListener('click', () => { camOn = !camOn; applyToggles(); });
 $('cMic').addEventListener('click', () => { micOn = !micOn; applyToggles(); sendState(); });
 $('cCam').addEventListener('click', () => { camOn = !camOn; applyToggles(); sendState(); });
 $('cFlip').addEventListener('click', () => swapTrack('video', facing === 'user' ? 'environment' : 'user'));
+$('pFlip').addEventListener('click', () => swapTrack('video', facing === 'user' ? 'environment' : 'user'));
 // Trying again also retries the camera when only the microphone started.
 $('retryMedia').addEventListener('click', () => {
   if (local && !local.getVideoTracks().length && !inCall) stopMedia();
@@ -928,15 +931,16 @@ function openLobby(r, invited, resume) {
   const saved = data.rooms.find(x => sameRoom(x, r));
   $('lobbyTitle').textContent = saved ? shownName(saved) : r.name;
   $('lobbyWho').hidden = true;
-  $('lobbyLead').textContent = invited
-    ? 'You have been invited to this room. Check your camera and sound, then join.'
-    : 'Check your camera and sound, then join.';
+  $('lobbyLive').hidden = true;
+  $('lobbyLead').hidden = !invited;
+  $('lobbyLead').textContent = invited ? 'You have been invited to this room. Check your camera and sound, then join.' : '';
   $('saveInviteRow').hidden = !(invited && !data.rooms.some(x => sameRoom(x, r)));
   $('saveInvite').checked = true;
   $('nameInput').value = data.name;
+  showInitial();
   $('lobbyErr').textContent = '';
   $('joinBtn').disabled = false;
-  $('joinBtn').textContent = 'Join call';
+  $('joinBtn').textContent = 'Join';
   micOn = resume ? resume.mic !== false : true;
   camOn = resume ? resume.cam !== false : true;
   push('lobby');
@@ -945,6 +949,7 @@ function openLobby(r, invited, resume) {
   const media = startMedia();
   checkNetwork().then(showNetWarning);
   if (resume && data.name) {
+    $('lobbyLead').hidden = false;
     $('lobbyLead').textContent = 'Rejoining the call…';
     $('joinBtn').disabled = true;
     $('joinBtn').textContent = 'Rejoining…';
@@ -953,6 +958,9 @@ function openLobby(r, invited, resume) {
 }
 
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.target.blur(); $('joinBtn').click(); } });
+// With the camera off, the preview shows your initial, as the others will see it.
+function showInitial() { $('previewInitial').textContent = initials(clean($('nameInput').value) || '?'); }
+$('nameInput').addEventListener('input', showInitial);
 $('joinBtn').addEventListener('click', () => join(''));
 // iPhones only let a video start by itself once it has been started from a tap: do that for the
 // floating video now, from the tap on Join, so it can float later.
@@ -977,7 +985,7 @@ async function join(resumeSession) {
   } catch {
     $('lobbyErr').textContent = 'Could not join. Check your connection and try again.';
     $('joinBtn').disabled = false;
-    $('joinBtn').textContent = 'Join call';
+    $('joinBtn').textContent = 'Join';
   }
 }
 
@@ -2468,6 +2476,8 @@ function showPresence(rk, names) {
   if (lobbyRoom && current === 'lobby' && roomKeyOf(lobbyRoom) === rk) {
     $('lobbyWho').hidden = !names.length;
     $('lobbyWho').textContent = names.length ? whoText(names) : '';
+    $('lobbyLive').hidden = !names.length;
+    $('lobbyLive').textContent = `${names.length} in call`;
   }
 }
 

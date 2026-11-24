@@ -148,17 +148,21 @@
 <!-- Before joining -->
 <section id="lobby" class="screen page" hidden>
   <header class="top">
-    <button class="back" data-back type="button"><svg class="ic"><use href="#i-back"/></svg>Rooms</button>
+    <span class="top-start">
+      <button class="icon-btn back-btn" data-back type="button" aria-label="Back to rooms"><svg class="ic"><use href="#i-back"/></svg></button>
+      <h2 class="headline" id="lobbyTitle"></h2>
+    </span>
+    <span class="live-chip" id="lobbyLive" hidden></span>
   </header>
-  <h2 id="lobbyTitle"></h2>
-  <p class="lead" id="lobbyLead"></p>
-  <p class="who-line" id="lobbyWho" hidden></p>
+  <p class="lead" id="lobbyLead" hidden></p>
   <div class="preview">
     <video id="preview" class="mirror" autoplay playsinline muted></video>
-    <div class="preview-off" id="previewOff">Camera is off</div>
+    <span class="glass-chip preview-chip">Preview</span>
+    <div class="preview-off" id="previewOff"><span class="avatar" id="previewInitial" aria-hidden="true">?</span><span id="previewOffText">Camera is off</span></div>
     <div class="preview-bar">
       <button class="round" id="pMic" type="button" aria-label="Turn microphone off"><svg class="ic on"><use href="#i-mic"/></svg><svg class="ic off"><use href="#i-mic-off"/></svg></button>
       <button class="round" id="pCam" type="button" aria-label="Turn camera off"><svg class="ic on"><use href="#i-camera"/></svg><svg class="ic off"><use href="#i-camera-off"/></svg></button>
+      <button class="round" id="pFlip" type="button" aria-label="Flip camera" hidden><svg class="ic"><use href="#i-flip"/></svg></button>
     </div>
   </div>
   <p class="error" id="mediaErr" role="alert"></p>
@@ -171,8 +175,9 @@
   </div>
   <label class="check" id="saveInviteRow" hidden><input type="checkbox" id="saveInvite" checked> Save this room on this device</label>
   <p class="error" id="lobbyErr" role="alert"></p>
-  <div class="actions">
-    <button class="btn primary" id="joinBtn" type="button">Join call</button>
+  <div class="actions bottom">
+    <p class="who-line" id="lobbyWho" hidden></p>
+    <button class="btn primary" id="joinBtn" type="button">Join</button>
   </div>
 </section>
 
